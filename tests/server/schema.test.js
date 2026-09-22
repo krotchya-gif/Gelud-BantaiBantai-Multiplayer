@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { moveInputSchema, sessionHelloSchema } from '../../shared/protocol/schemas.js';
+import { moveInputSchema, roomCreateSchema, sessionHelloSchema, settingsSchema } from '../../shared/protocol/schemas.js';
 
 describe('protocol schemas', () => {
   it('accepts bounded movement intent', () => {
@@ -10,5 +10,11 @@ describe('protocol schemas', () => {
   it('requires protocol version on hello', () => {
     expect(sessionHelloSchema.safeParse({ protocolVersion: 1, name: 'A' }).success).toBe(true);
     expect(sessionHelloSchema.safeParse({ name: 'A' }).success).toBe(false);
+  });
+
+  it('only accepts maps exposed by the shared map catalog', () => {
+    expect(roomCreateSchema.safeParse({ mapId: 'frozen-lake' }).success).toBe(true);
+    expect(roomCreateSchema.safeParse({ mapId: 'made-up-map' }).success).toBe(false);
+    expect(settingsSchema.safeParse({ mapId: 'gravity-rifts' }).success).toBe(true);
   });
 });

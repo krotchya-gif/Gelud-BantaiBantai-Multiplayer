@@ -17,6 +17,7 @@ Progress saat ini:
 - Fase 11–12: snapshot scoreboard, respawn, hazard gas/lava, match end, rematch-to-lobby, visual projectile/item, remote state, dan mode Classic/Blitz sudah dihubungkan.
 - Fase 13: reconnect token, duplicate-session guard, disconnected state, grace period, dan recovery snapshot saat match sudah dibuat.
 - Fase 14–15: fixed-step accumulator, optional server bot, map collision semantic, Dockerfile, Compose, dan Cloudflare Tunnel template sudah dibuat.
+- Character sync: lima model referensi Dusty/Titan/Ace/Fuse/Volt sudah diintegrasikan ke renderer multiplayer; balance Ace sudah disamakan di client dan authoritative server (`damage: 220`, basic `range: 8.2`, Super `damage: 220`). Verifikasi rig, animasi, material ownership, dan cache geometry sudah ditambahkan.
 - Deployment: template siap untuk VPS + Cloudflare Tunnel; belum dideploy karena token tunnel, hostname, dan akses VPS belum tersedia di workspace.
 
 Yang tersisa: verifikasi manual lintas perangkat/browser, soak/load test VPS, konfigurasi secret Cloudflare, dan membuat baseline Git/rollback setelah deployment.

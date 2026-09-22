@@ -124,6 +124,9 @@
       <h1 id="multiplayer-title">MULTIPLAYER</h1>
       <p id="multiplayer-status" class="network-status" role="status">Connect to a room server.</p>
       <div id="multiplayer-start" class="network-card">
+        <div class="room-settings">
+          <label>MAP <select id="room-create-map" aria-label="Map room"></select></label>
+        </div>
         <button class="big-btn" id="create-room" type="button">BUAT ROOM</button>
         <div class="room-join-row">
           <input id="room-code-input" maxlength="8" autocomplete="off" placeholder="KODE ROOM" aria-label="Kode room" />
@@ -136,11 +139,11 @@
         <div class="room-settings">
           <label>CHARACTER <select id="room-character"><option value="dusty">DUSTY</option><option value="ace">ACE</option><option value="fuse">FUSE</option><option value="titan">TITAN</option><option value="volt">VOLT</option><option value="naka">NAKA</option><option value="ello">ELLO</option><option value="syafiah">SYAFIAH</option></select></label>
           <label>MODE <select id="room-mode"><option value="deathmatch">DEATHMATCH</option><option value="classic">CLASSIC</option><option value="blitz">BLITZ</option></select></label>
-          <label>MAP <input id="room-map" value="open" maxlength="64" /></label>
+          <label>MAP <select id="room-map" aria-label="Map room"></select></label>
         </div>
         <div class="room-actions"><button class="ghost-btn" id="room-ready" type="button">READY</button><button class="big-btn" id="room-start" type="button" hidden>MULAI MATCH</button></div>
       </div>
-      <button class="ghost-btn" id="close-multiplayer" type="button">KEMBALI</button>
+      <button class="ghost-btn" id="close-multiplayer" type="button">KELUAR ROOM</button>
     </div>
 
     <div id="result" class="screen">
@@ -155,7 +158,7 @@
       <h1 id="pause-title">PAUSED</h1>
       <p id="pause-copy">Press P or Escape to resume the match.</p>
       <button class="big-btn" id="resume-match" type="button">RESUME</button>
-      <button class="ghost-btn" id="pause-to-menu" type="button">BACK TO SELECTION</button>
+      <button class="ghost-btn" id="pause-to-menu" type="button">EXIT ROOM / SELECTION</button>
     </div>
 
     <div id="toast"></div>

@@ -7,6 +7,7 @@ const legacyScripts = [
   'engine/render-pipeline.js',
   'engine/map-biomes.js',
   'engine/world.js',
+  'engine/character-models.js',
   'engine/brawlers.js',
   'engine/combat.js',
   'engine/effects.js',

@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { MAP_DEFINITIONS } from '../../shared/maps/MapDefinitions.js';
 
 const VALID_CHARACTERS = new Set(['dusty', 'ace', 'fuse', 'titan', 'volt', 'naka', 'ello', 'syafiah']);
 
@@ -10,7 +11,7 @@ export class Room {
     this.status = 'lobby';
     this.createdAt = now;
     this.lastEmptyAt = null;
-    this.settings = { mode, mapId, maxPlayers };
+    this.settings = { mode, mapId: Object.hasOwn(MAP_DEFINITIONS, mapId) ? mapId : 'open', maxPlayers };
     this.players = new Map();
     this.match = null;
   }
@@ -66,7 +67,10 @@ export class Room {
     if (this.hostPlayerId !== playerId) throw new Error('HOST_ONLY');
     if (this.status !== 'lobby') throw new Error('INVALID_ROOM_STATE');
     if (settings.mode) this.settings.mode = settings.mode;
-    if (settings.mapId) this.settings.mapId = settings.mapId;
+    if (settings.mapId) {
+      if (!Object.hasOwn(MAP_DEFINITIONS, settings.mapId)) throw new Error('INVALID_MAP');
+      this.settings.mapId = settings.mapId;
+    }
     if (settings.maxPlayers !== undefined) {
       if (settings.maxPlayers < this.players.size || settings.maxPlayers > 8 || settings.maxPlayers < 2) {
         throw new Error('INVALID_ROOM_SETTINGS');

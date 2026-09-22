@@ -20,12 +20,14 @@ export class MatchRunner {
     this.ended = false;
     this.stepMs = 1000 / config.tickRate;
     this.initPayload = null;
+    const mapSeed = randomInt(0, 0x7fffffff);
+    const matchSeed = randomInt(0, 0x7fffffff);
     this.simulation = new GameSimulation({
       mode: room.settings.mode,
       mapId: room.settings.mapId,
-      mapSeed: randomInt(0, 0x7fffffff),
-      matchSeed: randomInt(0, 0x7fffffff),
-      collision: createMapCollision(room.settings.mapId),
+      mapSeed,
+      matchSeed,
+      collision: createMapCollision(room.settings.mapId, mapSeed),
       players: [...room.players.values()].map((player, index, all) => {
         const angle = (index / Math.max(1, all.length)) * Math.PI * 2;
         return { ...player, x: Math.sin(angle) * 14, z: Math.cos(angle) * 14 };

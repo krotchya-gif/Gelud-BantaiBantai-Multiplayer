@@ -3,13 +3,14 @@ import { StateBuffer } from './StateBuffer.js';
 import { InputHistory, predictMovement } from './Prediction.js';
 import { reconcile } from './Reconciliation.js';
 import { getCharacterDef } from '../../shared/data/characters.js';
-import { MapCollision } from '../../shared/maps/MapCollision.js';
+import { createMapCollision } from '../../shared/maps/MapDefinitions.js';
 
 export class NetworkGameSession extends EventTarget {
-  constructor(networkClient, { collision = new MapCollision(), interpolationDelayMs = 100 } = {}) {
+  constructor(networkClient, { collision = null, interpolationDelayMs = 100 } = {}) {
     super();
     this.network = networkClient;
-    this.collision = collision;
+    this.collision = collision || createMapCollision('open', 0);
+    this.mapId = 'open';
     this.stateBuffer = new StateBuffer({ delayMs: interpolationDelayMs });
     this.inputHistory = new InputHistory();
     this.localPlayerId = null;
@@ -27,6 +28,10 @@ export class NetworkGameSession extends EventTarget {
   }
 
   onInit(payload) {
+    this.mapId = payload.mapId || 'open';
+    this.collision = createMapCollision(this.mapId, payload.mapSeed || 0);
+    this.stateBuffer.clear();
+    this.inputHistory = new InputHistory();
     this.localPlayerId = this.network.playerId || null;
     this.localPlayer = payload.players?.find((player) => player.id === this.localPlayerId) || null;
     this.latestSnapshot = { players: payload.players, match: payload };
@@ -46,6 +51,7 @@ export class NetworkGameSession extends EventTarget {
         1 / 30,
         getCharacterDef(player.characterId).speed,
         this.collision,
+        this.mapId,
       ));
     }
     this.dispatchEvent(new CustomEvent('snapshot', { detail: snapshot }));
@@ -54,7 +60,7 @@ export class NetworkGameSession extends EventTarget {
   sendMovement(input) {
     const payload = { seq: this.nextInputSeq += 1, ...input };
     this.inputHistory.add(payload);
-    if (this.localPlayer) this.localPlayer = predictMovement(this.localPlayer, payload, 1 / 30, getCharacterDef(this.localPlayer.characterId).speed, this.collision);
+    if (this.localPlayer) this.localPlayer = predictMovement(this.localPlayer, payload, 1 / 30, getCharacterDef(this.localPlayer.characterId).speed, this.collision, this.mapId);
     this.network.emit(CLIENT_EVENTS.inputMove, payload);
     return payload.seq;
   }

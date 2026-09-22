@@ -29,6 +29,7 @@ const ERROR_MESSAGES = Object.freeze({
   INVALID_ROOM_STATE: 'Room sedang tidak menerima perubahan.',
   NOT_IN_ROOM: 'Kamu belum masuk room.',
   INVALID_CHARACTER: 'Karakter tidak valid.',
+  INVALID_MAP: 'Map tidak tersedia.',
   INVALID_ROOM_SETTINGS: 'Pengaturan room tidak valid.',
   PROTOCOL_MISMATCH: 'Versi game berbeda. Muat ulang game.',
 });
@@ -148,10 +149,15 @@ export class SocketServer {
       }
     });
 
-    socket.on(CLIENT_EVENTS.roomLeave, () => {
+    const leaveRoom = (ack) => {
       if (!requireSession()) return;
       this.leaveCurrentRoom(session, socket);
-    });
+      if (typeof ack === 'function') ack({ ok: true });
+    };
+    socket.on(CLIENT_EVENTS.roomLeave, leaveRoom);
+    // Older clients used match:leave from the pause menu. Keep it as an
+    // explicit alias so leaving a running match also clears room membership.
+    socket.on(CLIENT_EVENTS.matchLeave, leaveRoom);
 
     socket.on(CLIENT_EVENTS.lobbySelectCharacter, (payload = {}) => {
       if (!requireSession()) return;

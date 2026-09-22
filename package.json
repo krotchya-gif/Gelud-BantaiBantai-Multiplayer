@@ -10,6 +10,7 @@
     "preview": "vite preview --host 0.0.0.0",
     "start:server": "node server/index.js",
     "test": "vitest run",
+    "test:characters": "node scripts/verify-character-models.mjs",
     "test:watch": "vitest"
   },
   "devDependencies": {

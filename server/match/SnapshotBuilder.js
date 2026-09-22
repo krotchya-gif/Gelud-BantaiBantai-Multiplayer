@@ -9,6 +9,8 @@ export function buildSnapshot(simulation) {
       characterId: player.characterId,
       x: Number(player.x.toFixed(4)),
       z: Number(player.z.toFixed(4)),
+      velX: Number((player.velX || 0).toFixed(4)),
+      velZ: Number((player.velZ || 0).toFixed(4)),
       facing: Number(player.facing.toFixed(4)),
       hp: player.hp,
       maxHp: player.maxHp,

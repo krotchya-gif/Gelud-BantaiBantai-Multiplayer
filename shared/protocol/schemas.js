@@ -1,6 +1,10 @@
 import { z } from 'zod';
+import { MAP_DEFINITIONS } from '../maps/MapDefinitions.js';
 
 const finiteNumber = z.number().finite();
+const mapIdSchema = z.string().trim().min(1).max(64).refine((value) => Object.hasOwn(MAP_DEFINITIONS, value), {
+  message: 'Map tidak tersedia.',
+});
 
 export const sessionHelloSchema = z.object({
   sessionId: z.string().min(1).max(80).optional(),
@@ -12,7 +16,7 @@ export const sessionHelloSchema = z.object({
 
 export const roomCreateSchema = z.object({
   mode: z.enum(['classic', 'blitz', 'deathmatch']).default('deathmatch'),
-  mapId: z.string().trim().min(1).max(64).default('open'),
+  mapId: mapIdSchema.default('open'),
   maxPlayers: z.number().int().min(2).max(8).default(8),
 }).strict();
 
@@ -28,7 +32,7 @@ export const readySchema = z.object({ ready: z.boolean() }).strict();
 
 export const settingsSchema = z.object({
   mode: z.enum(['classic', 'blitz', 'deathmatch']).optional(),
-  mapId: z.string().trim().min(1).max(64).optional(),
+  mapId: mapIdSchema.optional(),
   maxPlayers: z.number().int().min(2).max(8).optional(),
 }).strict();
 

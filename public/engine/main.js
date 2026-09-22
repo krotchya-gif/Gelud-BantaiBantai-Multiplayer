@@ -363,7 +363,10 @@ var ld = class {
   }
   toMenu() {
     if (this.networkSession) {
-      this.networkSession.network.emit(`match:leave`);
+      this.networkSession.network.leaveRoom?.();
+      this.networkSession.stateBuffer.clear();
+      this.networkSession.localPlayer = null;
+      window.__GBH_PENDING_NETWORK_MATCH__ = null;
       this.networkSession = null;
       this.networkMatch = null;
       this.networkEntities = null;
@@ -468,19 +471,44 @@ var ld = class {
     this.hud.syncSettings();
     document.body.classList.add(`playing`);
   }
+  networkAimDirection(player) {
+    if (!player) return null;
+    if (this.input.touchMode) {
+      const stick = this.input.sticks.aim;
+      if (stick.id !== null && stick.mag > 0.22) {
+        const length = Math.hypot(stick.x, stick.y) || 1;
+        return { x: stick.x / length, z: stick.y / length };
+      }
+      return { x: Math.sin(player.facing), z: Math.cos(player.facing) };
+    }
+    rd.set(this.input.ndcX, this.input.ndcY);
+    nd.setFromCamera(rd, this.camera);
+    if (nd.ray.intersectPlane(id, ad)) {
+      const x = ad.x - player.x;
+      const z = ad.z - player.z;
+      const length = Math.hypot(x, z);
+      if (length > 1e-6) return { x: x / length, z: z / length };
+    }
+    return { x: Math.sin(player.facing), z: Math.cos(player.facing) };
+  }
   updateNetwork(e) {
     this.elapsed += e;
     this.matchTime += e;
     this.networkInputT -= e;
+    const player = this.player;
+    const aim = this.networkAimDirection(player);
+    if (player && aim) {
+      player.facing = Math.atan2(aim.x, aim.z);
+      player.aimAngle = player.facing;
+      player.root.rotation.y = player.facing;
+    }
     if (this.networkInputT <= 0 && this.networkSession) {
       this.networkInputT += 1 / 30;
       const axis = this.input.axis();
-      const player = this.player;
-      const aimX = player ? Math.sin(player.facing) : 0;
-      const aimZ = player ? Math.cos(player.facing) : 1;
+      const aimX = aim?.x ?? (player ? Math.sin(player.facing) : 0);
+      const aimZ = aim?.z ?? (player ? Math.cos(player.facing) : 1);
       this.networkSession.sendMovement({ moveX: axis.x, moveZ: axis.z, aimX, aimZ });
     }
-    const player = this.player;
     if (player && this.networkSession) {
       for (const shot of this.input.takeShots()) {
         if (shot.cancelled) continue;
@@ -511,7 +539,10 @@ var ld = class {
       const predicted = this.networkSession.localPlayer;
       this.player.root.position.set(predicted.x, 0, predicted.z);
       this.player.facing = predicted.facing;
-      this.player.root.rotation.y = -predicted.facing;
+      this.player.aimAngle = predicted.facing;
+      this.player.root.rotation.y = predicted.facing;
+      this.player.vel.set(predicted.velX || 0, predicted.velZ || 0);
+      this.player.animate(e, this.player.vel.lengthSq() > 0.2);
     }
     const snapshot = this.networkSession?.renderState(Date.now());
     if (snapshot) {
@@ -521,7 +552,9 @@ var ld = class {
         if (remote.id === this.networkSession.localPlayerId) continue;
         entity.root.position.set(remote.x, 0, remote.z);
         entity.facing = remote.facing;
-        entity.root.rotation.y = -remote.facing;
+        entity.aimAngle = remote.facing;
+        entity.root.rotation.y = remote.facing;
+        entity.vel.set(remote.velX || 0, remote.velZ || 0);
         entity.hp = remote.hp;
         entity.maxHp = remote.maxHp;
         entity.kills = remote.kills || 0;
@@ -533,6 +566,7 @@ var ld = class {
         entity.itemSpeedT = remote.speedBoostT || 0;
         entity.spawnT = remote.spawnProtectionT || 0;
         entity.root.visible = remote.alive;
+        entity.animate(e, entity.alive && entity.vel.lengthSq() > 0.2);
       }
       const local = snapshot.players?.find((remote) => remote.id === this.networkSession.localPlayerId);
       if (local) {

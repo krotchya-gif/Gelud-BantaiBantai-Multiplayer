@@ -63,6 +63,7 @@ function mergeBrawlerPivot(e, t, n) {
   return i;
 }
 function uu(e, t) {
+  if (e.visual) return buildReferenceBrawler(e, t);
   let n = e.palette,
     r = {
       body: lu(n.body),

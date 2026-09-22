@@ -1,3 +1,27 @@
 node_modules/
 dist/
 .vercel/
+
+# env & secrets — file asli jangan commit, template *.example tetap di-track
+.env
+.env.local
+deployment/.env
+
+# cloudflared credentials (dirujuk config.yml via credentials-file)
+deployment/cloudflared/*.json
+*.pem
+*.key
+*.p12
+*.pfx
+
+# backup & log
+*.save
+*.bak
+*.orig
+*.log
+.npm-cache-build/
+output/
+
+# OS
+.DS_Store
+Thumbs.db

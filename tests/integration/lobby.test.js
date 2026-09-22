@@ -95,6 +95,32 @@ describe('multiplayer lobby', () => {
     expect(['PROJECTILE_SPAWN', 'DAMAGE', 'DEATH']).toContain(combatEvent.type);
   });
 
+  it('clears room membership when leaving from a running match', async () => {
+    const app = createGameServer({
+      config: { gameOrigin: '*', maxPlayersPerRoom: 8, roomIdleTtlSeconds: 60, logLevel: 'silent' },
+      logger: { info() {}, error() {}, warn() {} },
+    });
+    apps.push(app);
+    await new Promise((resolve) => app.httpServer.listen(0, '127.0.0.1', resolve));
+    const port = app.httpServer.address().port;
+    const first = await makeClient(port, 'Host');
+    first.emit('room:create', {});
+    const created = await once(first, SERVER_EVENTS.roomJoined);
+    const second = await makeClient(port, 'Guest');
+    second.emit('room:join', { code: created.room.code });
+    await once(first, SERVER_EVENTS.roomState);
+    const initPromise = once(first, SERVER_EVENTS.matchInit);
+    first.emit('lobby:start');
+    await initPromise;
+
+    const left = await new Promise((resolve) => first.emit('match:leave', resolve));
+    const session = [...app.socketServer.registry.sessionsById.values()].find((item) => item.name === 'Host');
+    const room = app.roomManager.findByCode(created.room.code);
+    expect(left.ok).toBe(true);
+    expect(session.roomId).toBeNull();
+    expect(room.players.has(session.playerId)).toBe(false);
+  });
+
   it('recovers the same lobby session during the grace period', async () => {
     const app = createGameServer({
       config: { gameOrigin: '*', reconnectGraceSeconds: 2, logLevel: 'silent' },

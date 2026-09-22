@@ -21,6 +21,7 @@ describe('Room', () => {
     room.addPlayer(player('p2'));
     expect(() => room.updateSettings('p2', { mapId: 'x' })).toThrow('HOST_ONLY');
     room.updateSettings('p1', { mode: 'blitz', mapId: 'frozen-lake' });
+    expect(() => room.updateSettings('p1', { mapId: 'made-up-map' })).toThrow('INVALID_MAP');
     room.startMatch('p1');
     expect(room.status).toBe('starting');
   });

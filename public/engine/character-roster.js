@@ -163,8 +163,31 @@
   };
   Bc.ace = {
     ...Bc.ace,
-    attack: { ...Bc.ace.attack, damage: 300, noKnockback: true },
-    super: { ...Bc.ace.super, damage: 300, breaksWalls: false, noKnockback: true },
+    attack: { ...Bc.ace.attack, damage: 220, range: 8.2, noKnockback: true },
+    super: { ...Bc.ace.super, damage: 220, breaksWalls: false, noKnockback: true },
   };
   Bc.titan = { ...Bc.titan, speed: 3.25, reload: 1.0 };
+
+  // Reference-sheet identities. Geometry is owned by character-models.js;
+  // these overrides are cosmetic and leave combat tuning intact.
+  const identities = {
+    dusty: { alias: 'Dusty', role: 'Shotgunner', visual: 'veteran',
+      palette: { body: 0x922d36, accent: 0xe3463e, skin: 0xc99070, dark: 0x252833 },
+      hair: 0x30252b, trim: 0xbaa794 },
+    titan: { alias: 'Titan', role: 'Tank', visual: 'juggernaut',
+      palette: { body: 0x65734d, accent: 0x93a078, skin: 0xd7a17f, dark: 0x292d32 },
+      hair: 0x22232b, trim: 0x71513b },
+    ace: { alias: 'Ace', role: 'Marksman', visual: 'gunslinger',
+      palette: { body: 0xe4e9f0, accent: 0x3c6bc5, skin: 0xe1b091, dark: 0x222b3c },
+      hair: 0x202337, trim: 0xdc493f },
+    fuse: { alias: 'Fuse', role: 'Demolitionist', visual: 'tinkerer',
+      palette: { body: 0xa74e23, accent: 0xff922e, skin: 0xdca079, dark: 0x303039 },
+      hair: 0x593324, trim: 0x9a7050 },
+    volt: { alias: 'Volt', role: 'Skirmisher', visual: 'runner',
+      palette: { body: 0xf3c332, accent: 0xffdf67, skin: 0xc98f6c, dark: 0x232934 },
+      hair: 0x29232a, trim: 0xe4e9f0 },
+  };
+  for (const [id, identity] of Object.entries(identities)) Object.assign(Bc[id], identity);
+  Bc.volt.attack = { ...Bc.volt.attack, color: 0xffd43b };
+  Bc.volt.super = { ...Bc.volt.super, color: 0xffed98 };
 })();

@@ -9,6 +9,7 @@ export class NetworkClient extends EventTarget {
     this.name = name;
     this.sessionId = sessionStorage.getItem('gbh-session-id') || null;
     this.reconnectToken = sessionStorage.getItem('gbh-reconnect-token') || null;
+    this.roomLeaveRequested = false;
     this.playerId = null;
     this.socket = null;
     if (autoConnect) this.connect();
@@ -44,6 +45,25 @@ export class NetworkClient extends EventTarget {
 
   emit(event, payload) {
     this.socket?.emit(event, payload);
+  }
+
+  leaveRoom() {
+    this.roomLeaveRequested = true;
+    if (!this.socket) return Promise.resolve({ ok: true });
+    return new Promise((resolve) => {
+      let settled = false;
+      const finish = (result = { ok: true }) => {
+        if (settled) return;
+        settled = true;
+        this.dispatchEvent(new CustomEvent('room-left', { detail: result }));
+        resolve(result);
+      };
+      const timeout = setTimeout(() => finish({ ok: false, timeout: true }), 1500);
+      this.socket.emit(CLIENT_EVENTS.roomLeave, (result) => {
+        clearTimeout(timeout);
+        finish(result);
+      });
+    });
   }
 
   disconnect() {

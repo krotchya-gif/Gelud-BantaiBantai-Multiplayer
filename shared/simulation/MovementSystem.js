@@ -6,11 +6,24 @@ export function stepMovement(state, dt, collision) {
     if (!player.alive) continue;
     const input = player.input;
     const direction = normalize2(input.moveX, input.moveZ);
-    const mapSurface = state.match.mapId.includes('frozen') || state.match.mapId.includes('ice') ? 'ice' : state.match.mapId.includes('bog') || state.match.mapId.includes('toxic') || state.match.mapId.includes('sunken-ruins') ? 'mud' : 'normal';
-    const surfaceMultiplier = mapSurface === 'ice' && player.characterId === 'ello' ? 1.08 : mapSurface === 'mud' ? 0.82 : 1;
-    const speed = getCharacterDef(player.characterId).speed * (player.speedBoostT > 0 ? 1.35 : 1) * (player.slowT > 0 ? 0.85 : 1) * surfaceMultiplier;
-    player.velX = direction.x * speed;
-    player.velZ = direction.z * speed;
+    const character = getCharacterDef(player.characterId);
+    const surface = collision.surfaceAt?.(player.x, player.z) ?? 'normal';
+    const gameplay = collision.layout?.gameplay ?? {};
+    let speed = character.speed * (gameplay.moveMultiplier ?? 1);
+    if (character.terrainAffinity?.type === 'bush' && surface === 'bush') speed *= character.terrainAffinity.moveMultiplier;
+    if (surface === 'mud') speed *= gameplay.mudMoveMultiplier ?? 1;
+    if (player.speedBoostT > 0) speed *= 1.35;
+    if (player.slowT > 0) speed *= 0.85;
+    if (player.chargeStartedAt != null && player.characterId === 'syafiah') speed *= 0.88;
+    if (surface === 'ice') {
+      const traction = (gameplay.iceFriction ?? gameplay.friction ?? 1) * (character.terrainAffinity?.type === 'ice' ? character.terrainAffinity.tractionMultiplier : 1);
+      const blend = 1 - Math.exp(-18 * Math.max(0.05, traction) * dt);
+      player.velX += (direction.x * speed - player.velX) * blend;
+      player.velZ += (direction.z * speed - player.velZ) * blend;
+    } else {
+      player.velX = direction.x * speed;
+      player.velZ = direction.z * speed;
+    }
     player.x += player.velX * dt;
     player.z += player.velZ * dt;
     if (Math.hypot(input.aimX, input.aimZ) > 1e-8) player.facing = Math.atan2(input.aimX, input.aimZ);

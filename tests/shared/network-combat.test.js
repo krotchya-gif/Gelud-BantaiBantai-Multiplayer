@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { GameSimulation } from '../../shared/simulation/GameSimulation.js';
+import { MapCollision } from '../../shared/maps/MapCollision.js';
 
 describe('authoritative super and items', () => {
   it('uses a charged super and emits its authoritative event', () => {
@@ -34,5 +35,24 @@ describe('authoritative super and items', () => {
     for (let index = 0; index < 160; index += 1) simulation.tick(1 / 30);
     expect(player.alive).toBe(true);
     expect(player.hp).toBe(player.maxHp);
+  });
+
+  it('stops authoritative projectiles at map blockers', () => {
+    const collision = new MapCollision({
+      minX: -10, maxX: 10, minZ: -10, maxZ: 10,
+      blockers: [{ minX: 1.5, maxX: 2.5, minZ: -3, maxZ: 3 }],
+    });
+    const simulation = new GameSimulation({
+      collision,
+      players: [
+        { id: 'p1', name: 'A', characterId: 'ace', x: 0, z: 0 },
+        { id: 'p2', name: 'B', characterId: 'dusty', x: 5, z: 0 },
+      ],
+    });
+    const target = simulation.state.players.get('p2');
+    expect(simulation.attackStart('p1', 1, 0)).toBe(true);
+    for (let index = 0; index < 12; index += 1) simulation.tick(1 / 30);
+    expect(target.hp).toBe(target.maxHp);
+    expect(simulation.state.projectiles.size).toBe(0);
   });
 });

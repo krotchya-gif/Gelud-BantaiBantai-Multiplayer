@@ -1,9 +1,63 @@
 import { clamp } from '../utils/math.js';
 
 export class MapCollision {
-  constructor({ minX = -20, maxX = 20, minZ = -20, maxZ = 20, blockers = [] } = {}) {
+  constructor({ minX = -20, maxX = 20, minZ = -20, maxZ = 20, blockers = [], layout = null } = {}) {
     this.bounds = { minX, maxX, minZ, maxZ };
     this.blockers = blockers.map((blocker) => ({ ...blocker }));
+    this.layout = layout;
+  }
+
+  worldToTile(x, z) {
+    if (!this.layout) return null;
+    const { size, origin } = this.layout;
+    const tileX = Math.floor(x - origin.x);
+    const tileZ = Math.floor(z - origin.z);
+    if (tileX < 0 || tileZ < 0 || tileX >= size || tileZ >= size) return null;
+    return { x: tileX, z: tileZ, index: tileZ * size + tileX };
+  }
+
+  cellAt(x, z) {
+    const tile = this.worldToTile(x, z);
+    return tile ? this.layout.cellsData[tile.index]?.kind ?? null : null;
+  }
+
+  metaAt(x, z) {
+    const tile = this.worldToTile(x, z);
+    return tile ? this.layout.cellsData[tile.index]?.meta ?? null : null;
+  }
+
+  surfaceAt(x, z) {
+    const cell = this.cellAt(x, z);
+    if (!this.layout || cell == null) return 'normal';
+    const { cells } = this.layout;
+    if (cell === cells.ICE) return 'ice';
+    if (cell === cells.MUD) return 'mud';
+    if (cell === cells.BUSH) return 'bush';
+    if (cell === cells.HAZARD) return 'hazard';
+    if (cell === cells.WATER) return 'water';
+    return 'normal';
+  }
+
+  hazardAt(x, z) {
+    if (this.surfaceAt(x, z) !== 'hazard') return null;
+    return this.metaAt(x, z)?.hazardType ?? 'lava';
+  }
+
+  isSolidPoint(x, z, radius = 0) {
+    const resolved = this.resolveCircle(x, z, radius);
+    return Math.abs(resolved.x - x) > 0.0001 || Math.abs(resolved.z - z) > 0.0001;
+  }
+
+  blocksSegment(ax, az, bx, bz, radius = 0) {
+    const distance = Math.hypot(bx - ax, bz - az);
+    const steps = Math.max(1, Math.ceil(distance / 0.22));
+    for (let index = 1; index <= steps; index += 1) {
+      const progress = index / steps;
+      const x = ax + (bx - ax) * progress;
+      const z = az + (bz - az) * progress;
+      if (this.isSolidPoint(x, z, radius)) return true;
+    }
+    return false;
   }
 
   resolveCircle(x, z, radius = 0.45) {

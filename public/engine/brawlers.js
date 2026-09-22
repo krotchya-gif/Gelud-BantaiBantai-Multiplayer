@@ -997,7 +997,7 @@ var du = 1,
         s = this.squash;
       ((n.body.position.y = o - Math.max(0, s) * 0.07),
         n.body.scale.set(1 + s * 0.09, 1 - s * 0.11, 1 + s * 0.09),
-        this.leap || (n.body.rotation.x = (t ? 0.13 : 0) - this.recoil * 0.2),
+        this.leap || (n.body.rotation.x = (t ? 0.13 + (n.pose.runLean || 0) : 0) - this.recoil * 0.2),
         (n.head.rotation.z = t ? Math.sin(this.walkPhase) * 0.05 : 0));
       if (this.def.id !== `ello`)
         n.weapon.position.z =

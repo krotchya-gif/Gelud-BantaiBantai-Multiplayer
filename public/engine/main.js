@@ -422,9 +422,12 @@ var ld = class {
     this.networkInputT = 0;
     this.networkActionId = 0;
     this.networkFire = false;
+    this.networkChargeActive = false;
+    this.networkAim = null;
     this.networkEntities = new Map();
     this.networkProjectiles = new Map();
     this.networkItems = new Map();
+    this.networkAreaPulse = new Map();
     if (!session.__gameBound) {
       session.__gameBound = true;
       session.addEventListener(`game-event`, ({ detail }) => this.handleNetworkEvent(detail));
@@ -460,6 +463,7 @@ var ld = class {
       this.hud.addBrawler(brawler);
       if (player.id === session.localPlayerId) this.player = brawler;
     }
+    this.networkAim = this.player ? { x: Math.sin(this.player.facing), z: Math.cos(this.player.facing) } : { x: 0, z: 1 };
     this.hud.showMenu(!1);
     this.hud.hideResult();
     this.state = `playing`;
@@ -471,15 +475,18 @@ var ld = class {
     this.hud.syncSettings();
     document.body.classList.add(`playing`);
   }
-  networkAimDirection(player) {
+  networkAimDirection(player, axis = null) {
     if (!player) return null;
     if (this.input.touchMode) {
       const stick = this.input.sticks.aim;
       if (stick.id !== null && stick.mag > 0.22) {
         const length = Math.hypot(stick.x, stick.y) || 1;
-        return { x: stick.x / length, z: stick.y / length };
+        this.networkAim = { x: stick.x / length, z: stick.y / length };
+      } else if (axis && Math.hypot(axis.x, axis.z) > 0.08) {
+        const length = Math.hypot(axis.x, axis.z) || 1;
+        this.networkAim = { x: axis.x / length, z: axis.z / length };
       }
-      return { x: Math.sin(player.facing), z: Math.cos(player.facing) };
+      return this.networkAim || { x: Math.sin(player.facing), z: Math.cos(player.facing) };
     }
     rd.set(this.input.ndcX, this.input.ndcY);
     nd.setFromCamera(rd, this.camera);
@@ -487,16 +494,42 @@ var ld = class {
       const x = ad.x - player.x;
       const z = ad.z - player.z;
       const length = Math.hypot(x, z);
-      if (length > 1e-6) return { x: x / length, z: z / length };
+      if (length > 1e-6) {
+        this.networkAim = { x: x / length, z: z / length };
+        return this.networkAim;
+      }
     }
-    return { x: Math.sin(player.facing), z: Math.cos(player.facing) };
+    return this.networkAim || { x: Math.sin(player.facing), z: Math.cos(player.facing) };
+  }
+  updateNetworkPresentation(entity, dt, moving) {
+    if (!entity) return;
+    entity.spawnT = Math.max(0, (entity.spawnT || 0) - dt);
+    entity.parryT = Math.max(0, (entity.parryT || 0) - dt);
+    entity.recoil = nl(entity.recoil || 0, 0, 14, dt);
+    entity.punch[0] = nl(entity.punch[0] || 0, 0, 16, dt);
+    entity.punch[1] = nl(entity.punch[1] || 0, 0, 16, dt);
+    entity.squash = nl(entity.squash || 0, 0, 12, dt);
+    if (entity.slashAnim) entity.slashAnim.t += dt;
+    if (entity.networkCharging) entity.chargeLevel = Math.min(1, (entity.chargeLevel || 0) + dt / 0.7);
+    else entity.chargeLevel = nl(entity.chargeLevel || 0, 0, 18, dt);
+    if (entity.networkDash) {
+      const dash = entity.networkDash;
+      dash.t += dt;
+      const amount = $c(dash.t / dash.duration, 0, 1);
+      const eased = amount * amount * (3 - 2 * amount);
+      entity.root.position.set(el(dash.fromX, dash.toX, eased), 0, el(dash.fromZ, dash.toZ, eased));
+      entity.vel.set(dash.dx * 5, dash.dz * 5);
+      if (amount >= 1) { entity.networkDash = null; entity.squash = 1.1; }
+    }
+    entity.animate(dt, moving && entity.alive);
   }
   updateNetwork(e) {
     this.elapsed += e;
     this.matchTime += e;
     this.networkInputT -= e;
     const player = this.player;
-    const aim = this.networkAimDirection(player);
+    const axis = this.input.axis();
+    const aim = this.networkAimDirection(player, axis);
     if (player && aim) {
       player.facing = Math.atan2(aim.x, aim.z);
       player.aimAngle = player.facing;
@@ -504,20 +537,31 @@ var ld = class {
     }
     if (this.networkInputT <= 0 && this.networkSession) {
       this.networkInputT += 1 / 30;
-      const axis = this.input.axis();
       const aimX = aim?.x ?? (player ? Math.sin(player.facing) : 0);
       const aimZ = aim?.z ?? (player ? Math.cos(player.facing) : 1);
       this.networkSession.sendMovement({ moveX: axis.x, moveZ: axis.z, aimX, aimZ });
     }
     if (player && this.networkSession) {
+      const aimStick = this.input.sticks.aim;
+      if (this.input.touchMode && player.def.id === `syafiah` && aimStick.id !== null && aimStick.mag > 0.22 && !this.networkChargeActive) {
+        this.networkChargeActive = true;
+        this.networkSession.sendAttackStart(aim.x, aim.z);
+        player.networkCharging = true;
+      }
       for (const shot of this.input.takeShots()) {
         if (shot.cancelled) continue;
         const kind = shot.kind === `super` ? `super` : `attack`;
-        const aim = this.stickAim(shot, player.def[kind]);
-        if (kind === `super`) this.networkSession.sendSuper(aim.dx, aim.dz, aim.x, aim.z);
+        const shotAim = this.stickAim(shot, player.def[kind]);
+        this.networkAim = { x: shotAim.dx, z: shotAim.dz };
+        player.facing = Math.atan2(shotAim.dx, shotAim.dz);
+        if (kind === `super`) this.networkSession.sendSuper(shotAim.dx, shotAim.dz, shotAim.x, shotAim.z);
         else {
-          this.networkSession.sendAttackStart(aim.dx, aim.dz);
-          if (player.def.id === `syafiah`) this.networkSession.sendAttackRelease(aim.dx, aim.dz);
+          if (player.def.id === `syafiah`) {
+            if (!this.networkChargeActive) this.networkSession.sendAttackStart(shotAim.dx, shotAim.dz);
+            this.networkSession.sendAttackRelease(shotAim.dx, shotAim.dz);
+            this.networkChargeActive = false;
+            player.networkCharging = false;
+          } else this.networkSession.sendAttackStart(shotAim.dx, shotAim.dz);
         }
       }
       if (!this.input.touchMode) {
@@ -531,18 +575,25 @@ var ld = class {
           this.networkFire = false;
           if (player.def.id === `syafiah`) {
             this.networkSession.sendAttackRelease(Math.sin(player.facing), Math.cos(player.facing));
+            this.networkChargeActive = false;
+            player.networkCharging = false;
           }
         }
       }
     }
     if (this.networkSession?.localPlayer && this.player) {
-      const predicted = this.networkSession.localPlayer;
-      this.player.root.position.set(predicted.x, 0, predicted.z);
-      this.player.facing = predicted.facing;
-      this.player.aimAngle = predicted.facing;
-      this.player.root.rotation.y = predicted.facing;
+      const predicted = this.networkSession.advancePrediction(e);
+      const distance = Math.hypot(this.player.root.position.x - predicted.x, this.player.root.position.z - predicted.z);
+      if (distance > 2.4) this.player.root.position.set(predicted.x, 0, predicted.z);
+      else {
+        this.player.root.position.x = nl(this.player.root.position.x, predicted.x, 28, e);
+        this.player.root.position.z = nl(this.player.root.position.z, predicted.z, 28, e);
+      }
+      this.player.facing = il(this.player.facing, predicted.facing, 28, e);
+      this.player.aimAngle = this.player.facing;
+      this.player.root.rotation.y = this.player.facing;
       this.player.vel.set(predicted.velX || 0, predicted.velZ || 0);
-      this.player.animate(e, this.player.vel.lengthSq() > 0.2);
+      this.updateNetworkPresentation(this.player, e, this.player.vel.lengthSq() > 0.2);
     }
     const snapshot = this.networkSession?.renderState(Date.now());
     if (snapshot) {
@@ -550,10 +601,10 @@ var ld = class {
         const entity = this.networkEntities.get(remote.id);
         if (!entity) continue;
         if (remote.id === this.networkSession.localPlayerId) continue;
-        entity.root.position.set(remote.x, 0, remote.z);
-        entity.facing = remote.facing;
+        if (!entity.networkDash) entity.root.position.set(remote.x, 0, remote.z);
+        entity.facing = il(entity.facing, remote.facing, 24, e);
         entity.aimAngle = remote.facing;
-        entity.root.rotation.y = remote.facing;
+        entity.root.rotation.y = entity.facing;
         entity.vel.set(remote.velX || 0, remote.velZ || 0);
         entity.hp = remote.hp;
         entity.maxHp = remote.maxHp;
@@ -563,10 +614,13 @@ var ld = class {
         entity.superCharge = remote.superCharge || 0;
         entity.heldItem = remote.heldItem || null;
         entity.shieldT = remote.shieldT || 0;
+        entity.parryT = remote.parryT || 0;
+        entity.slowT = remote.slowT || 0;
         entity.itemSpeedT = remote.speedBoostT || 0;
         entity.spawnT = remote.spawnProtectionT || 0;
+        entity.networkCharging = remote.charging === true;
         entity.root.visible = remote.alive;
-        entity.animate(e, entity.alive && entity.vel.lengthSq() > 0.2);
+        this.updateNetworkPresentation(entity, e, entity.vel.lengthSq() > 0.2);
       }
       const local = snapshot.players?.find((remote) => remote.id === this.networkSession.localPlayerId);
       if (local) {
@@ -580,10 +634,14 @@ var ld = class {
           this.player.heldItem = local.heldItem || null;
           this.player.shieldT = local.shieldT || 0;
           this.player.itemSpeedT = local.speedBoostT || 0;
+          this.player.parryT = local.parryT || 0;
+          this.player.networkCharging = local.charging === true;
+          this.focus.set(this.player.root.position.x, 0, this.player.root.position.z);
         }
       }
       this.syncNetworkProjectiles(snapshot.projectiles || []);
       this.syncNetworkItems(snapshot.items || []);
+      this.syncNetworkAreas(snapshot.areaEffects || []);
     }
     this.updateVisibility();
     this.updateTime(e);
@@ -592,6 +650,8 @@ var ld = class {
     this.effects.update(e);
     this.audio.listener.x = this.focus.x;
     this.audio.listener.z = this.focus.z;
+    for (const brawler of this.brawlers) if (brawler.alive && !brawler.hidden && brawler.superReady) this.lighting.addLight(brawler.x, 0.9, brawler.z, od, 1.5 + Math.sin(this.elapsed * 6) * 0.4, 3.6);
+    if (this.player?.alive && this.lighting.night > 0.02) this.lighting.addLight(this.player.x, 1.9, this.player.z, sd, 2.4 * this.lighting.night, 6.5);
     this.lighting.update(e, this.elapsed, this.camera, this.focus);
     this.hud.update(e);
     if (this.pendingResult) {
@@ -623,15 +683,61 @@ var ld = class {
     } else if (event.type === `RESPAWN`) {
       const target = this.networkEntities.get(event.playerId);
       if (target) { target.alive = true; target.hp = target.maxHp; target.root.visible = true; target.root.position.set(event.x, 0, event.z); }
+    } else if (event.type === `PROJECTILE_SPAWN`) {
+      const projectile = event.projectile;
+      if (!projectile || !entity) return;
+      entity.recoil = 1;
+      entity.squash = -0.28;
+      const color = new H(projectile.color || (projectile.electric ? 0x40ffff : 0xffc56c));
+      if (projectile.electric) this.effects.electricMuzzle(entity.x, 0.72, entity.z, projectile.dirX, projectile.dirZ, color, projectile.isSuper ? 1.4 : 1);
+      else this.effects.muzzle(entity.x, 0.72, entity.z, projectile.dirX, projectile.dirZ, color, projectile.isSuper ? 1.45 : 1);
+    } else if (event.type === `PROJECTILE_DESTROY`) {
+      const color = new H(event.color || (event.electric ? 0x40ffff : 0xffc56c));
+      if (event.electric) this.effects.electricImpact(event.x, 0.72, event.z, color, false);
+      else this.effects.impact(event.x, 0.72, event.z, color, 5);
+    } else if (event.type === `EXPLOSION`) {
+      const color = entity?.superColor || new H(0xffa15b);
+      this.effects.explosion(event.x, event.z, event.radius || 1.4, color, event.super === true);
+      if (entity?.isPlayer) this.shakeAmp = Math.max(this.shakeAmp, event.super ? 0.36 : 0.2);
+    } else if (event.type === `SUPER_DASH`) {
+      if (entity) {
+        const duration = entity.def.id === `titan` ? entity.def.super.flight || 0.75 : entity.def.super.flight || 0.22;
+        const dx = event.toX - event.fromX; const dz = event.toZ - event.fromZ;
+        const length = Math.hypot(dx, dz) || 1;
+        entity.networkDash = { ...event, dx: dx / length, dz: dz / length, t: 0, duration };
+        entity.recoil = 1; entity.squash = -0.35;
+        this.effects.dust(event.fromX, event.fromZ, entity.def.id === `titan` ? 10 : 6, entity.def.id === `titan` ? 2.4 : 1.6);
+      }
+    } else if (event.type === `PARRY_WINDOW`) {
+      if (entity) { entity.parryT = event.duration || 0.45; entity.recoil = 1; }
+    } else if (event.type === `PARRY`) {
+      if (entity) this.effects.impact(entity.x, 0.82, entity.z, entity.superColor, 12);
+    } else if (event.type === `ATTACK_CHARGE`) {
+      if (entity) { entity.networkCharging = true; entity.chargeLevel = 0; }
+    } else if (event.type === `ATTACK_RELEASE`) {
+      if (entity) { entity.networkCharging = false; entity.chargeLevel = 0; entity.recoil = 1; }
     } else if (event.type === `SUPER_USED` || event.type === `SUPER_ZONE` || event.type === `SUPER_WAVE`) {
       const x = Number.isFinite(event.targetX) ? event.targetX : event.x ?? entity?.x;
       const z = Number.isFinite(event.targetZ) ? event.targetZ : event.z ?? entity?.z;
-      if (Number.isFinite(x) && Number.isFinite(z)) this.effects.burst(x, 0.7, z, entity?.superColor || 0xd0a2ff, event.type === `SUPER_WAVE` ? 8 : 14, event.type === `SUPER_ZONE` ? 4 : 3);
+      if (Number.isFinite(x) && Number.isFinite(z)) {
+        const color = entity?.superColor || new H(0xd0a2ff);
+        if (event.type === `SUPER_ZONE`) this.effects.ring(x, z, event.radius || 3, color, 0.6, 2.3);
+        else if (event.type === `SUPER_WAVE`) this.effects.explosion(x, z, event.radius || 1.4, color, true);
+        else this.effects.burst(x, 0.7, z, color, 14, 3);
+      }
     } else if (event.type === `ITEM_PICKUP` || event.type === `ITEM_USED`) {
       const x = entity?.x || 0; const z = entity?.z || 0;
       this.effects.burst(x, 0.7, z, entity?.superColor || 0xffc93a, 8, 2.5);
     } else if (event.type === `MELEE_SWING`) {
-      if (entity) this.effects.slash?.(entity.x, entity.z, entity.superColor || entity.lightColor);
+      if (!entity) return;
+      entity.recoil = 0.9; entity.squash = -0.2;
+      if (entity.def.id === `ello`) {
+        entity.slashAnim = { t: 0, duration: 0.28, step: event.comboStep || 0, isSuper: false };
+        entity.slashTrailT = 0;
+      } else {
+        entity.punch[(event.attackSerial || 0) % 2] = 1;
+        this.effects.impact(entity.x + Math.sin(entity.facing) * 1.15, 0.72, entity.z + Math.cos(entity.facing) * 1.15, entity.lightColor, 7);
+      }
     }
   }
   syncNetworkProjectiles(projectiles) {
@@ -640,20 +746,31 @@ var ld = class {
       seen.add(projectile.id);
       let mesh = this.networkProjectiles.get(projectile.id);
       if (!mesh) {
-        const material = new Tn({ color: projectile.isSuper ? 0xffe08a : 0x9affdf, emissive: projectile.isSuper ? 0x7a3f0b : 0x164e4e, emissiveIntensity: 1.8, roughness: 0.3, metalness: 0.1 });
-        mesh = new Ln(new fr(0.2, 0.2, 0.2), material);
+        const color = projectile.color || (projectile.electric ? 0x40ffff : projectile.isSuper ? 0xffe08a : 0x9affdf);
+        const isBomb = projectile.kind === `bomb`;
+        const geometry = isBomb ? new fr(0.28, 0.28, 0.28) : brawlerProjectileGeometry(projectile.kind === `shuriken` ? `shuriken` : `arrow`);
+        const material = new Nr({ color, emissive: color, emissiveIntensity: projectile.electric ? 2.7 : 1.35, roughness: 0.26, metalness: projectile.kind === `shuriken` ? 0.72 : 0.18 });
+        mesh = new Ln(geometry, material);
         mesh.userData.networkProjectile = true;
+        mesh.userData.disposeGeometry = isBomb;
+        mesh.userData.trailAt = -Infinity;
         this.scene.add(mesh);
         this.networkProjectiles.set(projectile.id, mesh);
       }
-      mesh.position.set(projectile.x, 0.72, projectile.z);
+      mesh.position.set(projectile.x, 0.72 + (projectile.height || 0), projectile.z);
       mesh.rotation.y = Math.atan2(projectile.dirX, projectile.dirZ);
-      mesh.scale.set(projectile.radius > 0.25 ? 1.6 : 1, projectile.radius > 0.25 ? 1.6 : 1, projectile.radius > 0.25 ? 1.6 : 1);
+      const scale = projectile.kind === `bomb` ? (projectile.isSuper ? 1.75 : 1.3) : projectile.radius > 0.25 ? 1.45 : 1;
+      mesh.scale.setScalar(scale);
+      if (this.elapsed - mesh.userData.trailAt > (projectile.electric ? 0.032 : 0.055)) {
+        mesh.userData.trailAt = this.elapsed;
+        if (projectile.electric) this.effects.electricTrail(projectile.x, 0.72 + (projectile.height || 0), projectile.z, mesh.material.color, projectile.isSuper ? 0.28 : 0.18);
+        else this.effects.trail(projectile.x, 0.72 + (projectile.height || 0), projectile.z, mesh.material.color, projectile.isSuper ? 0.23 : 0.14);
+      }
     }
     for (const [id, mesh] of this.networkProjectiles) {
       if (seen.has(id)) continue;
       this.scene.remove(mesh);
-      mesh.geometry?.dispose?.();
+      if (mesh.userData.disposeGeometry) mesh.geometry?.dispose?.();
       mesh.material?.dispose?.();
       this.networkProjectiles.delete(id);
     }
@@ -665,32 +782,47 @@ var ld = class {
       let mesh = this.networkItems.get(item.id);
       if (!mesh) {
         const colors = { heal: 0x7dff9a, shield: 0x7ceaff, speed: 0xffd15c, ammo: 0xff956d, super: 0xd0a2ff };
-        mesh = new Ln(new fr(0.45, 0.45, 0.45), new Tn({ color: colors[item.kind] || 0xffc93a, emissive: colors[item.kind] || 0xffc93a, emissiveIntensity: 1.4, roughness: 0.28 }));
+        const width = item.kind === `shield` ? 0.56 : 0.38;
+        mesh = new Ln(new fr(width, item.kind === `heal` ? 0.6 : 0.38, width), new Nr({ color: colors[item.kind] || 0xffc93a, emissive: colors[item.kind] || 0xffc93a, emissiveIntensity: 1.5, roughness: 0.24, metalness: item.kind === `shield` ? 0.45 : 0.08 }));
         mesh.userData.networkItem = true;
         this.scene.add(mesh);
         this.networkItems.set(item.id, mesh);
       }
       mesh.visible = true;
       mesh.position.set(item.x, 0.55 + Math.sin(this.elapsed * 4 + item.x) * 0.08, item.z);
-      mesh.rotation.y += 0.04;
+      mesh.rotation.y += item.kind === `super` ? 0.075 : 0.04;
+      mesh.rotation.z = item.kind === `super` ? Math.PI / 4 : 0;
     }
     for (const [id, mesh] of this.networkItems) {
       if (seen.has(id)) continue;
       mesh.visible = false;
     }
   }
+  syncNetworkAreas(areas) {
+    const active = new Set();
+    for (const area of areas) {
+      active.add(area.id);
+      const previous = this.networkAreaPulse.get(area.id) || -Infinity;
+      if (this.elapsed - previous < 0.28) continue;
+      this.networkAreaPulse.set(area.id, this.elapsed);
+      const owner = this.networkEntities.get(area.ownerId);
+      this.effects.ring(area.x, area.z, area.radius || 3, owner?.superColor || new H(0xd0a2ff), 0.38, 2.15);
+    }
+    for (const id of this.networkAreaPulse.keys()) if (!active.has(id)) this.networkAreaPulse.delete(id);
+  }
   clearNetworkVisuals() {
     for (const collection of [this.networkProjectiles, this.networkItems]) {
       if (!collection) continue;
       for (const mesh of collection.values()) {
         this.scene.remove(mesh);
-        mesh.geometry?.dispose?.();
+        if (mesh.userData.disposeGeometry !== false) mesh.geometry?.dispose?.();
         mesh.material?.dispose?.();
       }
       collection.clear();
     }
     this.networkProjectiles = null;
     this.networkItems = null;
+    this.networkAreaPulse?.clear();
   }
   endNetworkMatch(result) {
     if (this.state !== `playing`) return;

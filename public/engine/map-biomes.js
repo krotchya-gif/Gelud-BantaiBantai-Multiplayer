@@ -312,6 +312,12 @@
    * Generator di bawah menerjemahkannya menjadi grid.
    */
   const MAPS = Object.freeze({
+    open: {
+      biome: 'grassland',
+      label: 'Open Arena',
+      recipe: 'open',
+      description: 'Arena terbuka dengan cover ringan dan jalur tembak lebar.',
+    },
     'green-crossroads': {
       biome: 'grassland',
       label: 'Green Crossroads',
@@ -1024,4 +1030,4 @@
     listByBiome,
     randomMap,
   });
-})(window);
+})(typeof window !== 'undefined' ? window : globalThis);

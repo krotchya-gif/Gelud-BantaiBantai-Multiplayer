@@ -1,5 +1,10 @@
 import { MapCollision } from './MapCollision.js';
 
+// The browser loads this classic map pack before a player can open a room.
+// The server and test runner load the exact same generator here so its
+// authoritative collision grid never drifts from the rendered arena.
+if (typeof window === 'undefined') await import('../../public/engine/map-biomes.js');
+
 // Keep the public map ids in one shared place. The renderer has richer
 // procedural geometry, while the server needs the same bounds, blockers,
 // spawn points, and surface rules for authoritative movement.
@@ -37,8 +42,92 @@ export function getMapDefinition(mapId = 'open') {
   return MAPS[mapId] || MAPS.open;
 }
 
+function getMapPack() {
+  return globalThis.GBH_MAP_PACK ?? null;
+}
+
+function buildBlueprintLayout(mapId, seed) {
+  const pack = getMapPack();
+  if (!pack?.generate || !pack.MAPS?.[mapId]) return null;
+  const blueprint = pack.generate(mapId, seed);
+  if (!blueprint?.cells?.length) return null;
+
+  const cells = pack.CELL;
+  const size = blueprint.size;
+  const solid = new Set([cells.WALL, cells.WATER]);
+  const blockers = [];
+  let previousRuns = new Map();
+
+  for (let tileZ = 0; tileZ < size; tileZ += 1) {
+    const nextRuns = new Map();
+    let tileX = 0;
+    while (tileX < size) {
+      if (!solid.has(blueprint.cells[tileZ * size + tileX].kind)) {
+        tileX += 1;
+        continue;
+      }
+      const start = tileX;
+      while (tileX < size && solid.has(blueprint.cells[tileZ * size + tileX].kind)) tileX += 1;
+      const key = `${start}:${tileX}`;
+      const existing = previousRuns.get(key);
+      if (existing) {
+        existing.maxZ = tileZ + 1 - size / 2;
+        nextRuns.set(key, existing);
+      } else {
+        const blocker = {
+          minX: start - size / 2,
+          maxX: tileX - size / 2,
+          minZ: tileZ - size / 2,
+          maxZ: tileZ + 1 - size / 2,
+        };
+        blockers.push(blocker);
+        nextRuns.set(key, blocker);
+      }
+    }
+    previousRuns = nextRuns;
+  }
+
+  return {
+    blueprint,
+    blockers,
+    layout: {
+      size,
+      origin: { x: -size / 2, z: -size / 2 },
+      cells: { ...cells },
+      cellsData: blueprint.cells,
+      gameplay: blueprint.gameplay,
+    },
+  };
+}
+
+export function getMapBlueprint(mapId = 'open', seed = 0) {
+  return buildBlueprintLayout(mapId, seed)?.blueprint ?? null;
+}
+
+export function buildMapSpawnPoints(mapId = 'open', seed = 0, count = 8) {
+  const blueprint = getMapBlueprint(mapId, seed);
+  if (!blueprint?.spawns?.length) return buildSpawnPoints(count);
+  const half = blueprint.size / 2;
+  return Array.from({ length: count }, (_, index) => {
+    const [tileX, tileZ] = blueprint.spawns[index % blueprint.spawns.length];
+    return { x: tileX + 0.5 - half, z: tileZ + 0.5 - half };
+  });
+}
+
 export function createMapCollision(mapId = 'open', seed = 0) {
   const map = getMapDefinition(mapId);
+  const exactLayout = buildBlueprintLayout(mapId, seed);
+  if (exactLayout) {
+    const half = exactLayout.layout.size / 2;
+    return new MapCollision({
+      minX: -half,
+      maxX: half,
+      minZ: -half,
+      maxZ: half,
+      blockers: exactLayout.blockers,
+      layout: exactLayout.layout,
+    });
+  }
   const blockers = [];
   const add = (minX, maxX, minZ, maxZ) => blockers.push({ minX, maxX, minZ, maxZ });
   const jitter = ((Math.abs(seed | 0) % 997) / 997 - 0.5) * 0.6;

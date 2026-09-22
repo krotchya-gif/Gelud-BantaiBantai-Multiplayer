@@ -44,10 +44,34 @@ function interpolateSnapshot(first, second, amount) {
       ...player,
       x: lerp(previous.x, player.x, amount),
       z: lerp(previous.z, player.z, amount),
+      velX: lerp(previous.velX || 0, player.velX || 0, amount),
+      velZ: lerp(previous.velZ || 0, player.velZ || 0, amount),
       facing: lerpAngle(previous.facing, player.facing, amount),
     };
   });
-  return { ...second, players };
+  return {
+    ...second,
+    players,
+    projectiles: interpolatePositions(first.projectiles, second.projectiles, amount),
+    items: interpolatePositions(first.items, second.items, amount),
+    areaEffects: interpolatePositions(first.areaEffects, second.areaEffects, amount),
+  };
+}
+
+function interpolatePositions(firstEntries = [], secondEntries = [], amount) {
+  const firstById = new Map(firstEntries.map((entry) => [entry.id, entry]));
+  return secondEntries.map((entry) => {
+    const previous = firstById.get(entry.id);
+    if (!previous || !Number.isFinite(previous.x) || !Number.isFinite(entry.x)) return { ...entry };
+    return {
+      ...entry,
+      x: lerp(previous.x, entry.x, amount),
+      z: lerp(previous.z, entry.z, amount),
+      remaining: Number.isFinite(previous.remaining) && Number.isFinite(entry.remaining)
+        ? lerp(previous.remaining, entry.remaining, amount)
+        : entry.remaining,
+    };
+  });
 }
 
 function lerpAngle(a, b, amount) {

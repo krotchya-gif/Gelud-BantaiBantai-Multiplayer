@@ -18,6 +18,7 @@ export class NetworkGameSession extends EventTarget {
     this.nextInputSeq = 0;
     this.nextActionId = 0;
     this.latestSnapshot = null;
+    this.latestInput = { moveX: 0, moveZ: 0, aimX: 0, aimZ: 1 };
     this.network.addEventListener(SERVER_EVENTS.matchInit, ({ detail }) => this.onInit(detail));
     this.network.addEventListener(SERVER_EVENTS.matchSnapshot, ({ detail }) => this.onSnapshot(detail));
     this.network.addEventListener(SERVER_EVENTS.matchEvent, ({ detail }) => this.dispatchEvent(new CustomEvent('game-event', { detail })));
@@ -34,6 +35,12 @@ export class NetworkGameSession extends EventTarget {
     this.inputHistory = new InputHistory();
     this.localPlayerId = this.network.playerId || null;
     this.localPlayer = payload.players?.find((player) => player.id === this.localPlayerId) || null;
+    this.latestInput = {
+      moveX: 0,
+      moveZ: 0,
+      aimX: Math.sin(this.localPlayer?.facing || 0),
+      aimZ: Math.cos(this.localPlayer?.facing || 0),
+    };
     this.latestSnapshot = { players: payload.players, match: payload };
     this.dispatchEvent(new CustomEvent('match-init', { detail: payload }));
   }
@@ -60,9 +67,22 @@ export class NetworkGameSession extends EventTarget {
   sendMovement(input) {
     const payload = { seq: this.nextInputSeq += 1, ...input };
     this.inputHistory.add(payload);
-    if (this.localPlayer) this.localPlayer = predictMovement(this.localPlayer, payload, 1 / 30, getCharacterDef(this.localPlayer.characterId).speed, this.collision, this.mapId);
+    this.latestInput = payload;
     this.network.emit(CLIENT_EVENTS.inputMove, payload);
     return payload.seq;
+  }
+
+  advancePrediction(dt) {
+    if (!this.localPlayer || !Number.isFinite(dt) || dt <= 0) return this.localPlayer;
+    this.localPlayer = predictMovement(
+      this.localPlayer,
+      this.latestInput,
+      Math.min(0.05, dt),
+      getCharacterDef(this.localPlayer.characterId).speed,
+      this.collision,
+      this.mapId,
+    );
+    return this.localPlayer;
   }
 
   sendAttackStart(aimX, aimZ) {

@@ -92,8 +92,9 @@ function performAttack(state, player, attack, direction) {
     state.events.push({ type: 'MELEE_SWING', ownerId: player.id, attackSerial: player.attackSerial, comboStep });
     return true;
   }
-  for (let index = 0; index < attack.count; index += 1) {
-    const offset = attack.count === 1 ? 0 : (index - (attack.count - 1) / 2) * (attack.spread || 0);
+  const count = Math.max(1, attack.count || attack.pellets || 1);
+  for (let index = 0; index < count; index += 1) {
+    const offset = count === 1 ? 0 : (index - (count - 1) / 2) * (attack.spread || 0);
     const angle = Math.atan2(direction.x, direction.z) + offset;
     spawnProjectile(state, player, attack, Math.sin(angle), Math.cos(angle));
   }
@@ -101,9 +102,10 @@ function performAttack(state, player, attack, direction) {
 }
 
 function executeSuper(state, player, attack, direction, targetX, targetZ) {
-  if (attack.kind === 'spread' || attack.kind === 'burst') {
-    for (let index = 0; index < attack.count; index += 1) {
-      const offset = attack.count === 1 ? 0 : (index - (attack.count - 1) / 2) * (attack.spread || 0.035);
+  if (attack.kind === 'spread' || attack.kind === 'burst' || attack.kind === 'lob') {
+    const count = Math.max(1, attack.count || attack.pellets || 1);
+    for (let index = 0; index < count; index += 1) {
+      const offset = count === 1 ? 0 : (index - (count - 1) / 2) * (attack.spread || 0.035);
       const angle = Math.atan2(direction.x, direction.z) + offset;
       spawnProjectile(state, player, attack, Math.sin(angle), Math.cos(angle), true);
     }
@@ -148,6 +150,9 @@ function spawnProjectile(state, player, attack, dirX, dirZ, isSuper = false) {
     dirX,
     dirZ,
     speed: attack.speed,
+    kind: attack.projectile || (attack.kind === 'lob' ? 'bomb' : 'bolt'),
+    color: attack.color || null,
+    electric: attack.electric === true,
     range: attack.range,
     radius: attack.radius || 0.16,
     damage: attack.damage,
@@ -155,7 +160,11 @@ function spawnProjectile(state, player, attack, dirX, dirZ, isSuper = false) {
     returning: attack.returning === true,
     onReturn: false,
     pierce: attack.pierce === true,
-    splashRadius: attack.splashRadius || 0,
+    splashRadius: attack.splashRadius || attack.blast || 0,
+    lob: attack.kind === 'lob',
+    flight: attack.flight || 0,
+    fuse: attack.fuse || 0,
+    height: 0,
     hitIds: new Set(),
     isSuper,
   };
@@ -169,6 +178,23 @@ export function stepProjectiles(state, dt) {
     const distance = projectile.speed * dt;
     projectile.x += projectile.dirX * distance; projectile.z += projectile.dirZ * distance; projectile.travelled += distance;
     let removed = false;
+    if (projectile.lob) {
+      const arc = Math.max(0, Math.min(1, projectile.travelled / Math.max(0.001, projectile.range)));
+      projectile.height = Math.sin(arc * Math.PI) * (projectile.isSuper ? 3.1 : 2.15);
+    }
+    const hitWall = !projectile.lob && state.collision?.blocksSegment?.(previousX, previousZ, projectile.x, projectile.z, Math.max(0.03, projectile.radius * 0.35));
+    if (hitWall) {
+      if (projectile.splashRadius > 0) {
+        hitRadius(state, state.players.get(projectile.ownerId), projectile.x, projectile.z, projectile.splashRadius, projectile.damage);
+        state.events.push({ type: 'EXPLOSION', ownerId: projectile.ownerId, x: projectile.x, z: projectile.z, radius: projectile.splashRadius, super: projectile.isSuper });
+      }
+      removed = true;
+    }
+    if (removed) {
+      state.projectiles.delete(id);
+      state.events.push({ type: 'PROJECTILE_DESTROY', projectileId: id, x: projectile.x, z: projectile.z, electric: projectile.electric, color: projectile.color });
+      continue;
+    }
     if (projectile.onReturn) {
       const owner = state.players.get(projectile.ownerId);
       if (owner && Math.hypot(projectile.x - owner.x, projectile.z - owner.z) <= projectile.radius + 0.35) removed = true;
@@ -181,7 +207,13 @@ export function stepProjectiles(state, dt) {
           projectile.dirX = direction.x; projectile.dirZ = direction.z; projectile.onReturn = true; projectile.travelled = 0; projectile.hitIds.clear();
           state.events.push({ type: 'PROJECTILE_RETURN', projectileId: projectile.id });
         } else removed = true;
-      } else removed = true;
+      } else {
+        if (projectile.splashRadius > 0) {
+          hitRadius(state, state.players.get(projectile.ownerId), projectile.x, projectile.z, projectile.splashRadius, projectile.damage);
+          state.events.push({ type: 'EXPLOSION', ownerId: projectile.ownerId, x: projectile.x, z: projectile.z, radius: projectile.splashRadius, super: projectile.isSuper });
+        }
+        removed = true;
+      }
     }
     for (const target of state.players.values()) {
       if (target.id === projectile.ownerId || !target.alive || projectile.hitIds.has(target.id)) continue;
@@ -194,13 +226,16 @@ export function stepProjectiles(state, dt) {
         state.events.push({ type: 'PARRY', ownerId: target.id, projectileId: projectile.id });
         continue;
       }
-      if (projectile.splashRadius > 0) hitRadius(state, state.players.get(projectile.ownerId), projectile.x, projectile.z, projectile.splashRadius, projectile.damage);
+      if (projectile.splashRadius > 0) {
+        hitRadius(state, state.players.get(projectile.ownerId), projectile.x, projectile.z, projectile.splashRadius, projectile.damage);
+        state.events.push({ type: 'EXPLOSION', ownerId: projectile.ownerId, x: projectile.x, z: projectile.z, radius: projectile.splashRadius, super: projectile.isSuper });
+      }
       else applyDamage(state, target, projectile.damage, state.players.get(projectile.ownerId));
       const owner = state.players.get(projectile.ownerId);
       if (owner?.characterId === 'naka' && projectile.returning && projectile.onReturn) owner.speedBoostT = 1.5;
       if (!projectile.returning && !projectile.pierce && projectile.splashRadius === 0) removed = true;
     }
-    if (removed) { state.projectiles.delete(id); state.events.push({ type: 'PROJECTILE_DESTROY', projectileId: id }); }
+    if (removed) { state.projectiles.delete(id); state.events.push({ type: 'PROJECTILE_DESTROY', projectileId: id, x: projectile.x, z: projectile.z, electric: projectile.electric, color: projectile.color }); }
   }
 }
 

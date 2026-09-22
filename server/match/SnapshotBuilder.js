@@ -21,8 +21,11 @@ export function buildSnapshot(simulation) {
       superCharge: Number((player.superCharge || 0).toFixed(4)),
       heldItem: player.heldItem || null,
       shieldT: Number((player.shieldT || 0).toFixed(3)),
+      parryT: Number((player.parryT || 0).toFixed(3)),
+      slowT: Number((player.slowT || 0).toFixed(3)),
       speedBoostT: Number((player.speedBoostT || 0).toFixed(3)),
       spawnProtectionT: Number((player.spawnProtectionT || 0).toFixed(3)),
+      charging: player.chargeStartedAt !== null,
     });
   }
   const projectiles = [...state.projectiles.values()].map(({ hitIds, ...projectile }) => ({

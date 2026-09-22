@@ -2,7 +2,7 @@ import { randomInt } from 'node:crypto';
 import { SERVER_EVENTS } from '../../shared/protocol/events.js';
 import { PROTOCOL_VERSION } from '../../shared/protocol/version.js';
 import { GameSimulation } from '../../shared/simulation/GameSimulation.js';
-import { createMapCollision } from '../../shared/maps/MapDefinitions.js';
+import { buildMapSpawnPoints, createMapCollision } from '../../shared/maps/MapDefinitions.js';
 import { buildSnapshot } from './SnapshotBuilder.js';
 import { BotSystem } from './BotSystem.js';
 
@@ -22,15 +22,18 @@ export class MatchRunner {
     this.initPayload = null;
     const mapSeed = randomInt(0, 0x7fffffff);
     const matchSeed = randomInt(0, 0x7fffffff);
+    const collision = createMapCollision(room.settings.mapId, mapSeed);
+    const spawnPoints = buildMapSpawnPoints(room.settings.mapId, mapSeed, Math.max(8, room.players.size + (config.serverBots || 0)));
     this.simulation = new GameSimulation({
       mode: room.settings.mode,
       mapId: room.settings.mapId,
       mapSeed,
       matchSeed,
-      collision: createMapCollision(room.settings.mapId, mapSeed),
+      collision,
+      spawnPoints,
       players: [...room.players.values()].map((player, index, all) => {
-        const angle = (index / Math.max(1, all.length)) * Math.PI * 2;
-        return { ...player, x: Math.sin(angle) * 14, z: Math.cos(angle) * 14 };
+        const point = spawnPoints[index % spawnPoints.length];
+        return { ...player, x: point.x, z: point.z };
       }),
     });
     this.bots = new BotSystem(this.simulation, { count: Math.min(config.serverBots || 0, Math.max(0, 8 - room.players.size)) });

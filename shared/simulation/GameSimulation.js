@@ -1,6 +1,5 @@
 import { SeededRng } from '../utils/rng.js';
 import { MapCollision } from '../maps/MapCollision.js';
-import { getMapDefinition } from '../maps/MapDefinitions.js';
 import { createSimulationState } from './SimulationState.js';
 import { stepMovement } from './MovementSystem.js';
 import { beginAttack, releaseAttack, stepAreaEffects, stepItems, stepProjectiles, useItem, useSuper, applyDamage } from './CombatSystem.js';
@@ -85,14 +84,9 @@ export class GameSimulation {
     for (const player of this.state.players.values()) {
       if (!player.alive) continue;
       if (radius !== null && Math.hypot(player.x, player.z) > radius) applyDamage(this.state, player, (match.mode === 'blitz' ? 220 : 150) * dt, null);
-      const hazard = getMapDefinition(this.state.match.mapId).hazard;
-      if (hazard === 'lava' && (Math.abs(player.x) < 1.7 || Math.abs(player.z) < 1.7)) {
-        applyDamage(this.state, player, 180 * dt, null);
-      } else if (hazard === 'toxic' && (Math.abs(player.x) < 2.4 || Math.abs(player.z) < 2.4)) {
-        applyDamage(this.state, player, 90 * dt, null);
-      } else if (this.state.match.mapId.includes('lava') || this.state.match.mapId.includes('molten') || this.state.match.mapId.includes('blackstone')) {
-        if (Math.abs(player.x) < 1.7 || Math.abs(player.z) < 1.7) applyDamage(this.state, player, 180 * dt, null);
-      }
+      const terrainHazard = this.collision.hazardAt?.(player.x, player.z);
+      if (terrainHazard === 'lava') applyDamage(this.state, player, 180 * dt, null);
+      else if (terrainHazard === 'toxic') applyDamage(this.state, player, 90 * dt, null);
     }
   }
 

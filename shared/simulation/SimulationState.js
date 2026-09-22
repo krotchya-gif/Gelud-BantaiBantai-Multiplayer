@@ -1,7 +1,7 @@
 import { getCharacterDef } from '../data/characters.js';
 import { buildSpawnPoints, getMapDefinition } from '../maps/MapDefinitions.js';
 
-export function createSimulationState({ mode = 'deathmatch', mapId = 'open', mapSeed = 0, matchSeed = 0, players = [] } = {}) {
+export function createSimulationState({ mode = 'deathmatch', mapId = 'open', mapSeed = 0, matchSeed = 0, players = [], spawnPoints = null } = {}) {
   const map = getMapDefinition(mapId);
   const rules = {
     deathmatch: { timeLimit: 300, respawn: true, respawnDelay: 5, targetKills: 50, gas: false },
@@ -31,7 +31,7 @@ export function createSimulationState({ mode = 'deathmatch', mapId = 'open', map
     items: new Map(),
     hazards: new Map(),
     areaEffects: new Map(),
-    spawnPoints: buildSpawnPoints(Math.max(1, players.length)),
+    spawnPoints: spawnPoints?.length ? spawnPoints.map((point) => ({ ...point })) : buildSpawnPoints(Math.max(1, players.length)),
     nextSpawnIndex: 0,
     events: [],
   };

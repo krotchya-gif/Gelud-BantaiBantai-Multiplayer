@@ -1,133 +1,164 @@
 # Gelud BakuHantam
 
-Gelud BakuHantam adalah arena brawler 3D top-down berbasis Three.js. Game berjalan sebagai situs statis/PWA; Vite dipakai untuk development, build, dan preview.
+Gelud BakuHantam adalah arena brawler 3D top-down berbasis Three.js. Project ini mempunyai dua jalur permainan:
 
-## Menjalankan
+- **Solo:** client menjalankan simulasi match, AI, combat, efek, dan PWA secara lokal.
+- **Multiplayer:** client Vite terhubung ke server Node.js + Socket.IO. Server menjadi sumber kebenaran untuk room, movement, collision, combat, item, respawn, scoreboard, hasil match, dan reconnect.
 
-```sh
+Renderer otomatis memakai WebGPU jika tersedia dan jatuh kembali ke WebGL2 jika tidak tersedia atau gagal diinisialisasi.
+
+## Kebutuhan
+
+- Node.js 20.19+ (atau versi Node.js LTS yang lebih baru)
+- npm
+- Browser modern dengan WebGL2. WebGPU bersifat opsional.
+
+## Menjalankan secara lokal
+
+Install dependency:
+
+~~~sh
 npm install
+~~~
+
+Jalankan client:
+
+~~~sh
 npm run dev
-```
+~~~
 
-Development server berjalan di `http://localhost:5173/` secara default.
+Client tersedia di http://localhost:5173/.
 
-Untuk menjalankan hasil production build:
+Untuk menguji multiplayer secara lokal, buat .env.local di root project:
 
-```sh
+~~~dotenv
+VITE_MULTIPLAYER_URL=http://localhost:3000
+~~~
+
+Lalu jalankan server di terminal kedua:
+
+~~~sh
+npm run dev:server
+~~~
+
+Server Socket.IO berjalan di http://localhost:3000 dan health check tersedia di http://localhost:3000/health.
+
+Jika VITE_MULTIPLAYER_URL tidak diisi, client mencoba memakai origin halaman yang sedang dibuka. Ini hanya cocok jika client dan server berada di origin yang sama atau reverse proxy sudah dikonfigurasi.
+
+## Script npm
+
+| Script | Kegunaan |
+| --- | --- |
+| npm run dev | Vite development server |
+| npm run dev:server | Server multiplayer dengan Node watch mode |
+| npm run start:server | Menjalankan server multiplayer production |
+| npm run build | Build client production ke dist/ dan membuat service worker |
+| npm run preview | Menyajikan hasil build secara lokal |
+| npm test | Menjalankan seluruh unit/integration test Vitest |
+| npm run test:characters | Memverifikasi model dan roster karakter |
+| npm run test:watch | Vitest dalam watch mode |
+
+Production preview:
+
+~~~sh
 npm run build
 npm run preview -- --port 4173
-```
+~~~
 
-Folder `dist/` adalah hasil deploy. Isinya dapat diunggah ke hosting statis seperti `public_html` atau Vercel. Node.js hanya dibutuhkan saat development dan build.
+Folder dist/ adalah artifact client yang dapat diunggah ke hosting statis. Server multiplayer tetap harus berjalan sebagai service Node.js terpisah.
 
-## Multiplayer server
+## Multiplayer room
 
-Server multiplayer berjalan terpisah dari client static:
+Alur room saat ini:
 
-```sh
-npm run dev:server
-```
+1. Buka MULTIPLAYER.
+2. Host memilih mode dan map saat membuat room.
+3. Pemain lain masuk memakai kode room enam karakter.
+4. Setiap pemain memilih karakter dan menekan READY.
+5. Host dapat mengganti map/mode selama room masih lobby, lalu menekan MULAI MATCH.
+6. Minimal dua pemain diperlukan untuk memulai match.
 
-Default server tersedia di `http://localhost:3000` dan menyediakan `GET /health`. Client multiplayer memakai `VITE_MULTIPLAYER_URL` saat build; salin [.env.example](.env.example) ke `.env` dan isi hostname Cloudflare Tunnel milikmu. Server sekarang menangani lobby, movement prediction/reconciliation, seluruh jalur Super, item pickup/use, respawn, hazard, scoreboard, hasil match, reconnect, dan mode Classic/Blitz.
+Room disimpan di memory process server. Restart server menghapus room yang sedang ada.
 
-Untuk mengaktifkan bot authoritative di server (opsional), set `SERVER_BOTS=1..6` pada environment Node. Bot hanya hidup di simulation server sehingga client tetap menerima snapshot dan event yang sama seperti pemain manusia.
+Koneksi yang terputus dapat reconnect memakai session token di sessionStorage selama grace period server. Tombol KELUAR ROOM mengirim room:leave dan menghapus membership room secara eksplisit; match:leave tetap diterima sebagai alias dari pause menu. Setelah keluar, pemain dapat bermain solo tanpa otomatis ditarik kembali ke room lama.
 
-Untuk deployment yang direncanakan, jalankan Node.js server di VPS dan teruskan service lokalnya melalui Cloudflare Tunnel. Contoh Docker Compose dan konfigurasi tunnel ada di [deployment/docker-compose.yml](deployment/docker-compose.yml), [deployment/cloudflared/config.yml](deployment/cloudflared/config.yml), serta [deployment/.env.example](deployment/.env.example). Jangan menyimpan token Cloudflare atau credential tunnel di repository.
+## Data server dan environment
 
-Urutan deployment VPS:
+Server membaca environment berikut (server/config.js):
 
-1. Buat dua hostname di Cloudflare, misalnya `game.example.com` untuk client statis dan `multiplayer.example.com` untuk tunnel server.
-2. Buat Cloudflare Tunnel dengan public hostname `multiplayer.example.com` yang mengarah ke service `http://game-server:3000`, lalu salin tokennya.
-3. Di VPS, clone/copy project ini, masuk ke folder `deployment`, salin `.env.example` menjadi `.env`, lalu isi `GAME_ORIGIN`, `VITE_MULTIPLAYER_URL`, dan `CLOUDFLARE_TUNNEL_TOKEN`.
-4. Jalankan `docker compose up -d --build` dari folder `deployment`. Pastikan `docker compose ps` menunjukkan `game-server` dan `cloudflared` sehat.
-5. Cek `https://multiplayer.example.com/health`; respons harus `{"status":"ok"}`.
-6. Build client dari mesin build dengan `VITE_MULTIPLAYER_URL=https://multiplayer.example.com npm run build`, lalu upload isi `dist/` ke hosting statis pada `game.example.com`.
-7. Dari dua browser/perangkat berbeda, buat room, join memakai kode, ready, mulai match, uji attack/Super/item, putuskan koneksi sebentar, lalu uji reconnect dan rematch.
+| Variable | Default | Keterangan |
+| --- | --- | --- |
+| PORT | 3000 | Port HTTP dan Socket.IO server |
+| GAME_ORIGIN | http://localhost:5173 | Origin client yang diizinkan; beberapa origin dapat dipisahkan koma |
+| TICK_RATE | 30 | Tick authoritative server per detik |
+| SNAPSHOT_RATE | 15 | Snapshot state ke client per detik |
+| MAX_CATCHUP_STEPS | 5 | Batas catch-up simulation |
+| MAX_PLAYERS_PER_ROOM | 8 | Batas pemain per room |
+| SERVER_BOTS | 0 | Jumlah bot authoritative, 0–6 |
+| ROOM_IDLE_TTL_SECONDS | 60 | Lama room kosong disimpan sebelum dibersihkan |
+| RECONNECT_GRACE_SECONDS | 10 | Waktu untuk reconnect session |
+| LOG_LEVEL | info | Level logger server |
 
-## Renderer
+VITE_MULTIPLAYER_URL adalah variable build-time client, bukan variable runtime server. Untuk production, isi URL publik server sebelum menjalankan build:
 
-`src/bootstrap.js` mencoba WebGPU jika tersedia, kemudian memuat engine gameplay klasik secara berurutan. Jika WebGPU tidak tersedia atau gagal diinisialisasi, game memakai WebGL2. Untuk memaksa fallback WebGL2:
+~~~dotenv
+# .env.local di root project
+VITE_MULTIPLAYER_URL=https://multiplayer.example.com
+~~~
 
-```text
-http://localhost:5173/?renderer=webgl
-```
+Jangan commit .env, .env.local, credential Cloudflare, atau token rahasia. Template environment deployment tersedia di deployment/.env.example.
 
-Jalur WebGPU dan WebGL2 memakai pipeline kualitas yang sama secara umum, tetapi beberapa efek post-processing dan shader lama memiliki padanan lebih sederhana di WebGPU.
+## Map dan biome
 
-## Struktur proyek
+Map procedural dibuat berdasarkan mapId dan seed. Generator yang sama dipakai renderer client dan collision authoritative server sehingga spawn point, dinding, air, hazard, dan surface tidak drift.
 
-```text
-index.html                     shell HTML, menu, HUD, dan tombol kontrol
-style.css                      seluruh style menu, HUD, dan kontrol mobile
-src/bootstrap.js               pemilihan renderer dan pemuatan engine
-src/pwa.js                     registrasi service worker dan update PWA
-vite.config.js                 konfigurasi Vite dan pembuatan service worker
-scripts/pwa-build.js           generator service worker production
-scripts/service-worker.js      template/cache service worker
-public/engine/
-  three-legacy.js              Three.js r186 dan roster baseline
-  character-roster.js          data revamp Naka, Ello, Syafiah, Zeyd, Einar
-  render-pipeline.js            renderer, kualitas, shadow, dan post-process
-  map-biomes.js                data biome dan aturan permukaan arena
-  world.js                     arena, collision, cover, dan objek dunia
-  brawlers.js                  model, state, input combat, AI-facing state
-  combat.js                    proyektil, melee, dash, knockback, dan item
-  effects.js                   partikel, impact, trail, gas, dan pencahayaan efek
-  interfaces.js                HUD, menu, settings, AI, dan kontrol touch
-  main.js                      lifecycle match, input player, dan game loop
-```
+Map legacy/default:
 
-File engine dimuat sebagai script klasik berurutan karena beberapa kelas Three.js dan gameplay memakai namespace global. `three-legacy.js` menyimpan library serta lima karakter baseline lama; data karakter yang direvisi ditimpa di `character-roster.js`.
+- open — Open Arena
 
-## Roster aktual
+Map pack berisi 8 biome dengan 3 varian masing-masing, total 24 map:
 
-| Brawler | HP | Speed | Basic | Range | Super / identitas |
-| --- | ---: | ---: | --- | ---: | --- |
-| Athallah | 3900 | 3.15 | 5 × 330 | 7.0 | 9 × 340, knockback 9, hancurkan dinding |
-| Zeyd | 3000 | 3.25 | 6 × 300 | 9.5 | 12 × 300, pierce, tanpa knockback, tidak hancurkan dinding |
-| Azka | 2900 | 3.00 | Bom AoE 920 | 7.5 | Bom AoE 2400, knockback 10, hancurkan dinding |
-| Einar | 6200 | 3.25 | 4 × 390 | 2.7 | Leap 1000, knockback 11, hancurkan dinding |
-| Nopal | 3400 | 3.55 | 3 × 440 | 8.4 | 8 × 310, pierce |
-| Naka | 3200 | 3.90 | 3 × 300 shuriken | 7.0 | Shadow Rush 900, dash 6.0, shuriken kembali |
-| Ello | 5500 | 3.30 | Combo 550 / 650 / 800 | 2.9 | Iaido 1100 atau 1500 setelah parry |
-| Syafiah | 2900 | 3.20 | Charge 650–1050 | 10.0–12.5 | Arrow Shower 5 × 250 |
+| Biome | Map |
+| --- | --- |
+| Greenlands | green-crossroads, river-fort, hedge-ring |
+| Dust Valley | dune-cross, dry-canyon, sunken-temple |
+| Frozen Fields | frozen-lake, ice-ridge, snow-fort |
+| Wild Jungle | river-temple, canopy-maze, waterfall-basin |
+| Magma Basin | crater-ring, molten-cross, blackstone-bridges |
+| Toxic Swamp | bog-islands, toxic-canals, sunken-ruins |
+| Sky Peaks | cliff-pass, temple-steps, twin-peaks |
+| Lunar Outpost | crater-grid, lunar-base, gravity-rifts |
 
-### Perubahan combat utama
+Surface gameplay mencakup bush, ice, mud, water/toxic hazard, lava, dan low gravity. Detail layout, warna, landmark, serta generator berada di public/engine/map-biomes.js; definisi shared dan collision berada di shared/maps/MapDefinitions.js dan shared/maps/MapCollision.js.
 
-- **Naka:** Triple Shuriken memakai spread sempit, speed 24, dan return damage 50%. Hit saat shuriken kembali memberi bonus speed 15% selama 1,5 detik. Shadow Rush berdash maksimal 6 unit dan tidak menembus dinding.
-- **Ello:** Tidak memakai ammo. Tiga serangan memakai cooldown dan combo reset 0,75 detik, masing-masing memiliki micro-lunge dengan collision. Samurai Poise mengurangi knockback 65%; slash, lunge, guard Iaido, dan dash Iaido memberi imunitas knockback sementara.
-- **Syafiah:** Tidak memakai ammo. Draw menginterpolasi damage, range, dan speed dari quick shot ke charged shot; Quickdraw memberi bonus 10% pada timing sekitar 0,70–0,80 detik. Arrow Shower menargetkan area, turun dalam lima wave, dan tidak diblokir atau menghancurkan dinding.
-- **Zeyd:** Damage basic dan Super menjadi 300 per projectile. Basic dan Super menggunakan `noKnockback`; Super tetap pierce tetapi tidak lagi menghancurkan dinding.
-- **Einar:** HP dan damage tetap; speed menjadi 3,25 dan reload menjadi 1 detik.
+## Roster karakter
 
-Athallah, Azka, dan Nopal tetap menjadi baseline pass ini. Item `ammo` berubah menjadi **Focus** yang mengisi 20% Super untuk Ello dan Syafiah; karakter lain tetap menerima ammo refill.
+ID karakter yang dipakai room, protocol, dan debug URL:
 
-## Mode dan arena
+| ID | Gaya bermain | Fitur utama |
+| --- | --- | --- |
+| dusty | Shotgunner | Spread jarak dekat |
+| ace | Marksman | Burst dan Steady Aim |
+| fuse | Demolitionist | Lob bom dan splash explosion |
+| titan | Tank | Melee combo dan leap |
+| volt | Skirmisher | Burst electric dan chain charge |
+| naka | Ninja | Returning shuriken dan Shadow Rush; bonus bush |
+| ello | Samurai | Combo katana, guard/parry, dan Iaido |
+| syafiah | Archer | Charged arrow dan Arrow Shower; bonus low gravity |
 
-Menu menyediakan Classic, Blitz, dan Deathmatch. Arena default lama adalah `open` (Open Arena), sedangkan `stepped` (Stepped Ruins) mempertahankan layout legacy. Map pack baru menambahkan 8 biome dengan 3 varian per biome, jadi ada 24 arena procedural. Setiap blueprint berukuran 44×44 dan dibuat ulang berdasarkan `seed`.
+Angka gameplay authoritative ada di shared/data/characters.js. Model, animasi, palette, dan metadata visual berada di public/engine/character-models.js, public/engine/character-roster.js, dan public/engine/brawlers.js.
 
-### Biome dan efek permukaan
+## Mode match
 
-| Biome | Arena | Ciri layout | Efek gameplay |
-| --- | --- | --- | --- |
-| 🌿 Greenlands | Green Crossroads · River Fort · Hedge Ring | crossroads · river · ring | Permukaan seimbang; semak, sungai, dan reruntuhan ringan. |
-| 🏜️ Dust Valley | Dune Cross · Dry Canyon · Sunken Temple | crossroads · lanes · courtyard | Friction 0,95 dan vision 1,1; sightline panjang serta canyon. |
-| ❄️ Frozen Fields | Frozen Lake · Ice Ridge · Snow Fort | lake · lanes · courtyard | Friction 0,82; permukaan ice memiliki friction 0,25 sehingga licin. |
-| 🌴 Wild Jungle | River Temple · Canopy Maze · Waterfall Basin | river · maze · basin | Vision 0,9; semak memberi concealment 1,25 dan flank lebih rapat. |
-| 🌋 Magma Basin | Crater Ring · Molten Cross · Blackstone Bridges | ring · lava-cross · river | Lava memberi damage 900 per detik; bridge menjadi choke point. |
-| 🐸 Toxic Swamp | Bog Islands · Toxic Canals · Sunken Ruins | islands · river · courtyard | Mud memperlambat ke 0,62; toxic water memberi damage 260 per detik; vision 0,88. |
-| 🏔️ Sky Peaks | Cliff Pass · Temple Steps · Twin Peaks | lanes · courtyard · split-center | Vision 1,05; pass sempit, courtyard, dan dua sisi high-ground. |
-| 🌙 Lunar Outpost | Crater Grid · Lunar Base · Gravity Rifts | basin · courtyard · split-center | Low gravity memakai multiplier 0,58; move 1,02, friction 0,9, vision 1,1. |
+Client dan room mendukung classic, blitz, dan deathmatch. Deathmatch menggunakan target 50 kill atau batas waktu 5 menit, respawn 5 detik, spawn protection 2 detik, dan power-up cap level 10.
 
-Nama yang dipakai URL adalah slug lowercase, misalnya `green-crossroads`, `frozen-lake`, atau `gravity-rifts`. `map-biomes.js` mengubah recipe menjadi grid, cover, spawn, landmark, dan surface hazard yang dipakai `world.js`.
-
-Deathmatch berakhir pada 50 kill atau 5 menit, memiliki power-up cap level 10, respawn 5 detik, dan spawn protection 2 detik. Efek permukaan juga berinteraksi dengan brawler, misalnya bonus gerak Naka di semak, traksi Ello di es, dan jangkauan Syafiah di gravitasi rendah.
+Jalur multiplayer juga mengirim snapshot/interpolation, client prediction/reconciliation, projectile dan area effect, item pickup/use, parry, super, damage/death/respawn, scoreboard, match end, dan rematch ke client.
 
 ## Kontrol
 
 Desktop:
 
-```text
+~~~text
 W A S D       bergerak
 Mouse         mengarahkan
 Click         basic attack
@@ -136,39 +167,106 @@ F             memakai item
 T             mengganti waktu hari
 P / Escape    pause atau lanjut
 M             mute
-```
+~~~
 
-Mobile memakai joystick kiri dan joystick aim kanan. Tombol **ITEM** berada di atas tombol **SUPER**, di luar area aim/basic attack. Event touch item diproses terpisah sehingga menekan item dengan jari kedua tidak mereset gerakan, bidikan, atau joystick yang sedang aktif. Mode left-handed memindahkan cluster aksi ke sisi kiri.
+Mobile memakai joystick kiri untuk movement dan joystick kanan untuk aim/auto-aim. Tombol ITEM berada terpisah dari area aim/basic attack. Mode left-handed dapat dipilih dari settings.
 
-## Parameter debug URL
+## Renderer dan debug URL
 
-Parameter yang dibaca engine:
+Paksa fallback WebGL2:
 
-```text
+~~~text
+http://localhost:5173/?renderer=webgl
+~~~
+
+Parameter debug yang tersedia:
+
+~~~text
 ?renderer=webgl
 ?q=low|medium|high|ultra
 ?bots=auto|easy|normal|hard|brutal
 ?mode=classic|blitz|deathmatch
-?map=<arena-key>
+?map=<map-id>
 ?auto=dusty|ace|fuse|titan|volt|naka|ello|syafiah
 ?seed=<angka>
 ?time=<jam-desimal>
 ?speed=1..16
 ?zoom=<angka>
 ?ss=0..3
-```
+~~~
 
 Contoh:
 
-```text
-http://localhost:5173/?renderer=webgl&mode=deathmatch&map=open&auto=ello&seed=42
-```
+~~~text
+http://localhost:5173/?renderer=webgl&mode=deathmatch&map=green-crossroads&auto=ello&seed=42
+~~~
 
-## Verifikasi build
+## Struktur project
 
-```sh
-npm test -- --run
+~~~text
+index.html                  shell menu, HUD, dan multiplayer room UI
+style.css                   style menu, HUD, dan kontrol mobile
+src/bootstrap.js             pilih renderer dan load engine klasik berurutan
+src/pwa.js                   registrasi/update service worker
+src/multiplayer/             client Socket.IO, lobby, prediction, buffer, session
+public/engine/               renderer, world, karakter, combat, efek, HUD, map pack
+shared/data/                 data gameplay karakter
+shared/maps/                 definisi map, generator bridge, dan collision
+shared/protocol/             event, schema, dan protocol version
+shared/simulation/           simulation state, movement, combat, hazard
+server/                      HTTP health, Socket.IO, room, match runner, bot, security
+deployment/                  Dockerfile, Compose server, env template, tunnel config
+tests/                       unit, integration, network, server, dan map parity test
+~~~
+
+Engine klasik dimuat sebagai script global berurutan karena sebagian gameplay lama masih memakai namespace Three.js global. Modul multiplayer/shared tetap memakai ES modules dan dipakai bersama browser serta Node.js.
+
+## Deployment
+
+### Static client + Node.js server
+
+1. Di mesin build, isi .env.local dengan VITE_MULTIPLAYER_URL publik.
+2. Jalankan npm ci lalu npm run build.
+3. Upload isi dist/ ke hosting static.
+4. Jalankan npm ci --omit=dev dan npm run start:server di VPS, dengan PORT dan GAME_ORIGIN sesuai domain.
+5. Pastikan GET /health mengembalikan JSON dengan status: "ok".
+6. Letakkan reverse proxy atau Cloudflare Tunnel di depan port server agar client memakai HTTPS/WSS.
+
+### Docker di VPS
+
+deployment/docker-compose.yml saat ini membangun dan menjalankan service game-server pada 127.0.0.1:3200.
+
+~~~sh
+cd deployment
+cp .env.example .env
+# isi GAME_ORIGIN dan environment server di .env
+docker compose up -d --build
+docker compose ps
+curl http://127.0.0.1:3200/health
+~~~
+
+Cloudflare Tunnel dikelola terpisah dari Compose aktif. Jika cloudflared dijalankan di container yang satu network dengan game-server, target dapat memakai http://game-server:3200. Jika dijalankan langsung di host VPS, gunakan http://127.0.0.1:3200. Credential tunnel harus berada di luar repository.
+
+### Update dari GitHub
+
+Project ini memakai branch main dan remote origin. Alur update VPS:
+
+~~~sh
+git pull origin main
+npm ci
 npm run build
-```
+~~~
 
-Build menulis output ke `dist/`. Ukuran bundle vendor WebGPU Three.js dapat memunculkan peringatan ukuran chunk dari Vite; ini tidak menghentikan build.
+Untuk deployment Docker, jalankan docker compose up -d --build dari folder deployment setelah pull. Restart process Node.js/container setelah source server berubah. Tidak diperlukan cron atau pemindahan file manual.
+
+Setelah deploy, uji dari dua browser/perangkat: create room, pilih map, join dengan kode, ready, mulai match, gerakkan/aim, gunakan attack/Super/item, keluar room ke solo, lalu uji reconnect dan rematch.
+
+## Verifikasi
+
+~~~sh
+npm test
+npm run test:characters
+npm run build
+~~~
+
+Build menulis output ke dist/. Warning ukuran chunk vendor WebGPU dari Vite tidak menghentikan build. Karena production build memakai service worker, lakukan hard refresh atau update PWA jika browser masih menampilkan asset versi lama setelah deploy.

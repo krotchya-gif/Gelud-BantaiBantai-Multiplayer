@@ -10,12 +10,19 @@ services:
       GAME_ORIGIN: ${GAME_ORIGIN}
       TICK_RATE: ${TICK_RATE:-30}
       SNAPSHOT_RATE: ${SNAPSHOT_RATE:-15}
+      MAX_CATCHUP_STEPS: ${MAX_CATCHUP_STEPS:-5}
+      SERVER_BOTS: ${SERVER_BOTS:-0}
       MAX_PLAYERS_PER_ROOM: ${MAX_PLAYERS_PER_ROOM:-8}
       ROOM_IDLE_TTL_SECONDS: ${ROOM_IDLE_TTL_SECONDS:-60}
       RECONNECT_GRACE_SECONDS: ${RECONNECT_GRACE_SECONDS:-10}
       LOG_LEVEL: ${LOG_LEVEL:-info}
     expose:
       - "3000"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/health').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
 
   cloudflared:
     image: cloudflare/cloudflared:latest

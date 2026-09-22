@@ -34,6 +34,16 @@ Untuk mengaktifkan bot authoritative di server (opsional), set `SERVER_BOTS=1..6
 
 Untuk deployment yang direncanakan, jalankan Node.js server di VPS dan teruskan service lokalnya melalui Cloudflare Tunnel. Contoh Docker Compose dan konfigurasi tunnel ada di [deployment/docker-compose.yml](deployment/docker-compose.yml), [deployment/cloudflared/config.yml](deployment/cloudflared/config.yml), serta [deployment/.env.example](deployment/.env.example). Jangan menyimpan token Cloudflare atau credential tunnel di repository.
 
+Urutan deployment VPS:
+
+1. Buat dua hostname di Cloudflare, misalnya `game.example.com` untuk client statis dan `multiplayer.example.com` untuk tunnel server.
+2. Buat Cloudflare Tunnel dengan public hostname `multiplayer.example.com` yang mengarah ke service `http://game-server:3000`, lalu salin tokennya.
+3. Di VPS, clone/copy project ini, masuk ke folder `deployment`, salin `.env.example` menjadi `.env`, lalu isi `GAME_ORIGIN`, `VITE_MULTIPLAYER_URL`, dan `CLOUDFLARE_TUNNEL_TOKEN`.
+4. Jalankan `docker compose up -d --build` dari folder `deployment`. Pastikan `docker compose ps` menunjukkan `game-server` dan `cloudflared` sehat.
+5. Cek `https://multiplayer.example.com/health`; respons harus `{"status":"ok"}`.
+6. Build client dari mesin build dengan `VITE_MULTIPLAYER_URL=https://multiplayer.example.com npm run build`, lalu upload isi `dist/` ke hosting statis pada `game.example.com`.
+7. Dari dua browser/perangkat berbeda, buat room, join memakai kode, ready, mulai match, uji attack/Super/item, putuskan koneksi sebentar, lalu uji reconnect dan rematch.
+
 ## Renderer
 
 `src/bootstrap.js` mencoba WebGPU jika tersedia, kemudian memuat engine gameplay klasik secara berurutan. Jika WebGPU tidak tersedia atau gagal diinisialisasi, game memakai WebGL2. Untuk memaksa fallback WebGL2:

@@ -1,0 +1,9 @@
+# Use this file with a named tunnel when the VPS is managed by config.yml.
+# Keep tunnel credentials outside the repository.
+tunnel: REPLACE_WITH_TUNNEL_UUID
+credentials-file: /etc/cloudflared/REPLACE_WITH_TUNNEL_UUID.json
+
+ingress:
+  - hostname: multiplayer.example.com
+    service: http://game-server:3000
+  - service: http_status:404

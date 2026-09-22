@@ -1,0 +1,18 @@
+{
+  "id": "./",
+  "name": "Gelud BakuHantam",
+  "short_name": "BakuHantam",
+  "description": "Pick a brawler and battle against bots across elemental arenas.",
+  "lang": "en",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "landscape",
+  "background_color": "#0b0e1a",
+  "theme_color": "#0b0e1a",
+  "icons": [
+    { "src": "icons/bakuhantam-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icons/bakuhantam-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icons/bakuhantam-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

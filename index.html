@@ -1,0 +1,173 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0b0e1a">
+  <link rel="manifest" href="./manifest.webmanifest">
+  <link rel="icon" type="image/png" href="./icons/bakuhantam-192.png">
+  <link rel="apple-touch-icon" href="./icons/bakuhantam-apple-180.png">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="BakuHantam">
+  <title>Gelud BakuHantam</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Lilita+One&family=Nunito:wght@600;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="./style.css">
+</head>
+<body>
+<canvas id="game"></canvas>
+
+    <div id="hud" class="hidden">
+      <div id="gas-warn"></div>
+      <div id="hurt"></div>
+      <div id="low-health"></div>
+      <div id="fps-counter" aria-label="Frames per second">FPS --</div>
+      <div id="overheads"></div>
+      <div id="floaters"></div>
+      <div id="feed"></div>
+      <div id="topbar">
+        <div class="pill" id="left-count">BRAWLERS LEFT <b>8</b></div>
+        <div class="pill" id="clock">15:24</div>
+        <div class="pill" id="mode-badge">CLASSIC</div>
+      </div>
+      <div id="dm-leaderboard" hidden aria-live="polite">
+        <h2>LEADERBOARD</h2>
+        <ol id="dm-leaderboard-list"></ol>
+      </div>
+      <div id="banner" class="outline"></div>
+      <div id="hints"><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> move &nbsp; <kbd>Mouse</kbd> aim &nbsp; <kbd>Click</kbd> shoot<br /><kbd>Space</kbd> / <kbd>Right-click</kbd> hold to aim super, release to fire<br /><kbd>F</kbd> use item &nbsp; <kbd>T</kbd> time of day &nbsp; <kbd>P</kbd> pause &nbsp; <kbd>M</kbd> mute</div>
+      <div id="sticks">
+        <div class="stick" id="stick-move"><i></i><b>MOVE</b></div>
+        <div class="stick" id="stick-aim"><i></i><b>DRAG TO AIM &middot; TAP TO AUTO-AIM</b></div>
+      </div>
+      <div id="action-cluster">
+        <div id="super"><div class="core" id="super-core">SUPER</div></div>
+        <button id="item-action" type="button" disabled aria-label="No item held" title="No item held">
+          <span class="item-icon" id="item-icon" aria-hidden="true">◇</span>
+          <span class="item-label" id="item-label">ITEM</span>
+          <span class="item-key" id="item-key">F</span>
+        </button>
+      </div>
+    </div>
+
+    <div id="desktop-actions" aria-label="Match controls">
+      <button id="desktop-pause-btn" type="button" aria-label="Pause game" title="Pause game (P)">
+        <svg class="pause-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" aria-hidden="true"><path d="M9 5v14M15 5v14" /></svg>
+        <svg class="play-icon" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="m8 5 11 7-11 7Z" /></svg>
+      </button>
+      <button id="desktop-menu-btn" type="button" aria-label="Return to main menu" title="Return to main menu">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m3 10 9-7 9 7v10a1 1 0 0 1-1 1h-6v-7h-4v7H4a1 1 0 0 1-1-1Z" /></svg>
+      </button>
+    </div>
+
+    <div id="mobile-actions">
+      <button id="fullscreen-btn" aria-label="Enter fullscreen landscape" title="Fullscreen"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 3H3v5M16 3h5v5M8 21H3v-5M16 21h5v-5" /></svg></button>
+      <button id="pause-btn" aria-label="Pause game" title="Pause"><svg class="pause-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" aria-hidden="true"><path d="M9 5v14M15 5v14" /></svg><svg class="play-icon" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="m8 5 11 7-11 7Z" /></svg></button>
+      <button id="gear" title="Settings" aria-label="Open settings"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06-2.83 2.83-.06-.06A1.7 1.7 0 0 0 15 19.4a1.7 1.7 0 0 0-1 .6 1.7 1.7 0 0 0-.4 1.1V21H9.6v-.09A1.7 1.7 0 0 0 8.5 19.4a1.7 1.7 0 0 0-1.88.34l-.06.06-2.83-2.83.06-.06A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-.6-1 1.7 1.7 0 0 0-1.1-.4H3V9.6h.09A1.7 1.7 0 0 0 4.6 8.5a1.7 1.7 0 0 0-.34-1.88l-.06-.06 2.83-2.83.06.06A1.7 1.7 0 0 0 9 4.6a1.7 1.7 0 0 0 1-.6 1.7 1.7 0 0 0 .4-1.1V3h4v.09A1.7 1.7 0 0 0 15.5 4.6a1.7 1.7 0 0 0 1.88-.34l.06-.06 2.83 2.83-.06.06A1.7 1.7 0 0 0 19.4 9c.12.38.34.73.65 1 .3.26.69.4 1.1.4H21v4h-.09A1.7 1.7 0 0 0 19.4 15Z"/></svg></button>
+    </div>
+    <div id="settings">
+      <h3>Settings</h3>
+      <h4>BOTS</h4>
+      <div class="seg" id="difficulty-seg"></div>
+      <h4>GAME MODE</h4>
+      <div class="seg" id="mode-seg"></div>
+      <h4>QUALITY</h4>
+      <div class="seg" id="quality-seg"></div>
+      <div class="tip" id="renderer-info">Renderer auto-selecting…</div>
+      <h4>TIME OF DAY</h4>
+      <div class="row"><label for="auto-time">Follow the match (afternoon &rarr; night)</label><input type="checkbox" id="auto-time" checked /></div>
+      <div class="row"><span id="time-label">15:24</span><input type="range" id="time-slider" min="0" max="24" step="0.05" value="15.4" /></div>
+      <div class="tip">Drag to scrub the sun. Press <kbd>T</kbd> in game to jump between noon, golden hour, dusk and night.</div>
+      <h4>EFFECTS</h4>
+      <div class="row"><label for="tog-ao">Ambient occlusion (WebGL2)</label><input type="checkbox" id="tog-ao" checked /></div>
+      <div class="row"><label for="tog-bloom">Bloom (WebGL2)</label><input type="checkbox" id="tog-bloom" checked /></div>
+      <div class="row"><label for="tog-mute">Mute sound (<kbd>M</kbd>)</label><input type="checkbox" id="tog-mute" /></div>
+      <h4>MOBILE</h4>
+      <div class="row"><label for="tog-haptics">Haptic feedback</label><input type="checkbox" id="tog-haptics" checked /></div>
+      <div class="row"><label for="tog-left">Left-handed controls</label><input type="checkbox" id="tog-left" /></div>
+      <div class="row"><span>Display</span><button class="compact-btn" id="enter-fullscreen">FULLSCREEN LANDSCAPE</button></div>
+      <div id="stats"></div>
+    </div>
+
+    <div id="menu" class="screen">
+      <h1 id="title">GELUD<span>BAKUHANTAM</span></h1>
+      <div id="tagline">Choose a mode, arena, and brawler before you jump in.</div>
+      <section class="menu-group">
+        <h2>GAME MODE</h2>
+        <div id="mode-cards" class="choice-cards"></div>
+      </section>
+      <section class="menu-group">
+        <h2>ARENA</h2>
+        <div id="arena-cards" class="choice-cards"></div>
+      </section>
+      <section class="menu-group brawler-group">
+        <h2>CHOOSE YOUR BRAWLER</h2>
+        <div id="cards"></div>
+      </section>
+      <button class="big-btn" id="play">PLAY</button>
+      <button class="ghost-btn multiplayer-menu-btn" id="open-multiplayer" type="button">MULTIPLAYER</button>
+      <div id="pwa-controls">
+        <button type="button" class="ghost-btn" id="install-game" aria-controls="install-help" aria-expanded="false">INSTALL GAME</button>
+        <button type="button" class="ghost-btn" id="update-game" hidden>UPDATE GAME</button>
+        <div id="install-help" hidden>
+          <p><b>iPhone / iPad:</b> Open in Safari → Share → Add to Home Screen → Open as Web App (if shown) → Add.</p>
+          <p><b>Android:</b> Open in Chrome → menu ⋮ → Install app / Add to Home screen. If opened inside another app, open this address in your browser first.</p>
+        </div>
+        <p id="pwa-status" role="status">Preparing offline play…</p>
+      </div>
+      <div id="menu-hint"><span class="for-keys">Open <kbd>&#9881;</kbd> to scrub the time of day and tune shadows</span><span class="for-touch">Left thumb moves &middot; right thumb drags to aim, release to fire &middot; tap to auto-aim</span></div>
+    </div>
+
+    <div id="multiplayer" class="screen" aria-labelledby="multiplayer-title">
+      <h1 id="multiplayer-title">MULTIPLAYER</h1>
+      <p id="multiplayer-status" class="network-status" role="status">Connect to a room server.</p>
+      <div id="multiplayer-start" class="network-card">
+        <button class="big-btn" id="create-room" type="button">BUAT ROOM</button>
+        <div class="room-join-row">
+          <input id="room-code-input" maxlength="8" autocomplete="off" placeholder="KODE ROOM" aria-label="Kode room" />
+          <button class="ghost-btn" id="join-room" type="button">GABUNG</button>
+        </div>
+      </div>
+      <div id="multiplayer-room" class="network-card" hidden>
+        <div class="room-code-display">ROOM <strong id="room-code-value">------</strong><button class="compact-btn" id="copy-room-code" type="button">COPY</button></div>
+        <div id="room-player-list" class="room-player-list"></div>
+        <div class="room-settings">
+          <label>CHARACTER <select id="room-character"><option value="dusty">DUSTY</option><option value="ace">ACE</option><option value="fuse">FUSE</option><option value="titan">TITAN</option><option value="volt">VOLT</option><option value="naka">NAKA</option><option value="ello">ELLO</option><option value="syafiah">SYAFIAH</option></select></label>
+          <label>MODE <select id="room-mode"><option value="deathmatch">DEATHMATCH</option><option value="classic">CLASSIC</option><option value="blitz">BLITZ</option></select></label>
+          <label>MAP <input id="room-map" value="open" maxlength="64" /></label>
+        </div>
+        <div class="room-actions"><button class="ghost-btn" id="room-ready" type="button">READY</button><button class="big-btn" id="room-start" type="button" hidden>MULAI MATCH</button></div>
+      </div>
+      <button class="ghost-btn" id="close-multiplayer" type="button">KEMBALI</button>
+    </div>
+
+    <div id="result" class="screen">
+      <h1 id="result-title">VICTORY!</h1>
+      <div id="result-rank" class="outline"></div>
+      <div id="result-stats"></div>
+      <button class="big-btn" id="again">PLAY AGAIN</button>
+      <button class="ghost-btn" id="to-menu">BACK TO SELECTION</button>
+    </div>
+
+    <div id="pause-menu" class="screen" role="dialog" aria-modal="true" aria-labelledby="pause-title" aria-hidden="true">
+      <h1 id="pause-title">PAUSED</h1>
+      <p id="pause-copy">Press P or Escape to resume the match.</p>
+      <button class="big-btn" id="resume-match" type="button">RESUME</button>
+      <button class="ghost-btn" id="pause-to-menu" type="button">BACK TO SELECTION</button>
+    </div>
+
+    <div id="toast"></div>
+    <div id="rotate" role="dialog" aria-label="Landscape orientation required">
+      <div class="rotate-card">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M7 4h10a3 3 0 0 1 3 3v10a3 3 0 0 1-3 3H7a3 3 0 0 1-3-3V7a3 3 0 0 1 3-3Z"/><path d="m9 9-2 2-2-2M7 11V7m8 8 2-2 2 2m-2-2v4"/></svg>
+        <h2>ROTATE TO PLAY</h2>
+        <p>Turn your phone sideways for a wider arena and more precise controls.</p>
+        <button class="compact-btn" id="rotate-fullscreen">TRY FULLSCREEN</button>
+      </div>
+    </div>
+    <div id="loading">Lighting the lamps&hellip;</div>
+  <script type="module" src="./src/bootstrap.js"></script>
+</body>
+</html>

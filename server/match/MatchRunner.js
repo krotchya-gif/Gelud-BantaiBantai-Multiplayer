@@ -1,0 +1,149 @@
+import { randomInt } from 'node:crypto';
+import { SERVER_EVENTS } from '../../shared/protocol/events.js';
+import { PROTOCOL_VERSION } from '../../shared/protocol/version.js';
+import { GameSimulation } from '../../shared/simulation/GameSimulation.js';
+import { createMapCollision } from '../../shared/maps/MapDefinitions.js';
+import { buildSnapshot } from './SnapshotBuilder.js';
+import { BotSystem } from './BotSystem.js';
+
+export class MatchRunner {
+  constructor({ room, io, config, logger = console }) {
+    this.room = room;
+    this.io = io;
+    this.config = config;
+    this.logger = logger;
+    this.snapshotEvery = Math.max(1, Math.round(config.tickRate / config.snapshotRate));
+    this.snapshotCounter = 0;
+    this.timer = null;
+    this.lastTime = 0;
+    this.accumulator = 0;
+    this.ended = false;
+    this.stepMs = 1000 / config.tickRate;
+    this.initPayload = null;
+    this.simulation = new GameSimulation({
+      mode: room.settings.mode,
+      mapId: room.settings.mapId,
+      mapSeed: randomInt(0, 0x7fffffff),
+      matchSeed: randomInt(0, 0x7fffffff),
+      collision: createMapCollision(room.settings.mapId),
+      players: [...room.players.values()].map((player, index, all) => {
+        const angle = (index / Math.max(1, all.length)) * Math.PI * 2;
+        return { ...player, x: Math.sin(angle) * 14, z: Math.cos(angle) * 14 };
+      }),
+    });
+    this.bots = new BotSystem(this.simulation, { count: Math.min(config.serverBots || 0, Math.max(0, 8 - room.players.size)) });
+  }
+
+  start() {
+    this.room.status = 'running';
+    this.initPayload = {
+      protocolVersion: PROTOCOL_VERSION,
+      tickRate: this.config.tickRate,
+      snapshotRate: this.config.snapshotRate,
+      mode: this.room.settings.mode,
+      mapId: this.room.settings.mapId,
+      mapSeed: this.simulation.state.match.mapSeed,
+      matchSeed: this.simulation.state.match.matchSeed,
+      players: buildSnapshot(this.simulation).players,
+    };
+    this.io.to(this.room.id).emit(SERVER_EVENTS.matchInit, this.initPayload);
+    this.lastTime = Date.now();
+    this.timer = setInterval(() => this.pump(), this.stepMs);
+    this.timer.unref?.();
+    this.logger.info?.({ roomId: this.room.id }, 'match start');
+  }
+
+  acceptInput(playerId, input) {
+    return this.simulation.setInput(playerId, input);
+  }
+
+  acceptAttackStart(playerId, aimX, aimZ) {
+    return this.simulation.attackStart(playerId, aimX, aimZ);
+  }
+
+  acceptAttackRelease(playerId, aimX, aimZ) {
+    return this.simulation.attackRelease(playerId, aimX, aimZ);
+  }
+
+  acceptSuper(playerId, payload) {
+    return this.simulation.super(playerId, payload);
+  }
+
+  acceptItem(playerId) {
+    return this.simulation.item(playerId);
+  }
+
+  sendCurrentState(socket) {
+    if (!this.initPayload) return;
+    socket.emit(SERVER_EVENTS.matchInit, { ...this.initPayload, players: buildSnapshot(this.simulation).players });
+    socket.emit(SERVER_EVENTS.matchSnapshot, buildSnapshot(this.simulation));
+  }
+
+  pump() {
+    const now = Date.now();
+    const elapsed = Math.min(250, Math.max(0, now - this.lastTime));
+    this.lastTime = now;
+    this.accumulator += elapsed;
+    let steps = 0;
+    while (this.accumulator >= this.stepMs && steps < (this.config.maxCatchupSteps || 5)) {
+      this.tick(1 / this.config.tickRate);
+      this.accumulator -= this.stepMs;
+      steps += 1;
+    }
+    if (steps >= (this.config.maxCatchupSteps || 5)) this.accumulator = 0;
+  }
+
+  tick(dt) {
+    this.bots.tick();
+    const events = this.simulation.tick(dt);
+    for (const event of events) {
+      if (event.type === 'MATCH_END') continue;
+      this.io.to(this.room.id).emit(SERVER_EVENTS.matchEvent, event);
+    }
+    this.snapshotCounter += 1;
+    if (this.snapshotCounter >= this.snapshotEvery || events.length) {
+      this.snapshotCounter = 0;
+      this.io.to(this.room.id).volatile.emit(SERVER_EVENTS.matchSnapshot, buildSnapshot(this.simulation));
+    }
+    if (this.simulation.state.match.status === 'ended') this.finish();
+  }
+
+  removePlayer(playerId) {
+    this.simulation.removePlayer(playerId);
+  }
+
+  setPlayerConnected(playerId, connected) {
+    const player = this.simulation.state.players.get(playerId);
+    if (!player) return;
+    player.connected = connected;
+    if (!connected) {
+      player.input.moveX = 0;
+      player.input.moveZ = 0;
+    }
+  }
+
+  stop() {
+    if (this.timer) clearInterval(this.timer);
+    this.timer = null;
+    this.room.match = null;
+  }
+
+  finish() {
+    if (this.ended) return;
+    this.ended = true;
+    const match = this.simulation.state.match;
+    const result = {
+      reason: match.endReason || 'server',
+      winnerId: match.winnerId || null,
+      scores: [...this.simulation.state.players.values()].map((player) => ({ id: player.id, name: player.name, kills: player.kills, deaths: player.deaths, alive: player.alive })),
+      match: { ...match },
+    };
+    this.io.to(this.room.id).emit(SERVER_EVENTS.matchEnd, result);
+    this.room.status = 'ended';
+    for (const player of this.room.players.values()) player.ready = false;
+    this.room.status = 'lobby';
+    this.io.to(this.room.id).emit(SERVER_EVENTS.roomState, this.room.toPublicState());
+    this.stop();
+    this.onFinished?.(result);
+  }
+}

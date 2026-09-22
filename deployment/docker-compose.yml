@@ -1,0 +1,25 @@
+services:
+  game-server:
+    build:
+      context: ..
+      dockerfile: deployment/Dockerfile
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      GAME_ORIGIN: ${GAME_ORIGIN}
+      TICK_RATE: ${TICK_RATE:-30}
+      SNAPSHOT_RATE: ${SNAPSHOT_RATE:-15}
+      MAX_PLAYERS_PER_ROOM: ${MAX_PLAYERS_PER_ROOM:-8}
+      ROOM_IDLE_TTL_SECONDS: ${ROOM_IDLE_TTL_SECONDS:-60}
+      RECONNECT_GRACE_SECONDS: ${RECONNECT_GRACE_SECONDS:-10}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    expose:
+      - "3000"
+
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    restart: unless-stopped
+    depends_on:
+      - game-server
+    command: tunnel --no-autoupdate run --token ${CLOUDFLARE_TUNNEL_TOKEN}

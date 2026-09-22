@@ -1,0 +1,85 @@
+import { CLIENT_EVENTS, SERVER_EVENTS } from '../../shared/protocol/events.js';
+import { StateBuffer } from './StateBuffer.js';
+import { InputHistory, predictMovement } from './Prediction.js';
+import { reconcile } from './Reconciliation.js';
+import { getCharacterDef } from '../../shared/data/characters.js';
+import { MapCollision } from '../../shared/maps/MapCollision.js';
+
+export class NetworkGameSession extends EventTarget {
+  constructor(networkClient, { collision = new MapCollision(), interpolationDelayMs = 100 } = {}) {
+    super();
+    this.network = networkClient;
+    this.collision = collision;
+    this.stateBuffer = new StateBuffer({ delayMs: interpolationDelayMs });
+    this.inputHistory = new InputHistory();
+    this.localPlayerId = null;
+    this.localPlayer = null;
+    this.nextInputSeq = 0;
+    this.nextActionId = 0;
+    this.latestSnapshot = null;
+    this.network.addEventListener(SERVER_EVENTS.matchInit, ({ detail }) => this.onInit(detail));
+    this.network.addEventListener(SERVER_EVENTS.matchSnapshot, ({ detail }) => this.onSnapshot(detail));
+    this.network.addEventListener(SERVER_EVENTS.matchEvent, ({ detail }) => this.dispatchEvent(new CustomEvent('game-event', { detail })));
+    this.network.addEventListener(SERVER_EVENTS.matchEnd, ({ detail }) => this.dispatchEvent(new CustomEvent('match-end', { detail })));
+    this.network.addEventListener('connect', () => this.dispatchEvent(new CustomEvent('connection', { detail: { connected: true } })));
+    this.network.addEventListener('disconnect', () => this.dispatchEvent(new CustomEvent('connection', { detail: { connected: false } })));
+    this.network.addEventListener(SERVER_EVENTS.sessionRecovered, ({ detail }) => this.dispatchEvent(new CustomEvent('session-recovered', { detail })));
+  }
+
+  onInit(payload) {
+    this.localPlayerId = this.network.playerId || null;
+    this.localPlayer = payload.players?.find((player) => player.id === this.localPlayerId) || null;
+    this.latestSnapshot = { players: payload.players, match: payload };
+    this.dispatchEvent(new CustomEvent('match-init', { detail: payload }));
+  }
+
+  onSnapshot(snapshot) {
+    this.latestSnapshot = snapshot;
+    this.stateBuffer.push(snapshot);
+    const ack = snapshot.ack?.[this.localPlayerId];
+    if (Number.isInteger(ack)) this.inputHistory.acknowledge(ack);
+    const authoritative = snapshot.players?.find((player) => player.id === this.localPlayerId);
+    if (authoritative && this.localPlayer) {
+      this.localPlayer = reconcile(authoritative, this.inputHistory.pending(), (player, input) => predictMovement(
+        player,
+        input,
+        1 / 30,
+        getCharacterDef(player.characterId).speed,
+        this.collision,
+      ));
+    }
+    this.dispatchEvent(new CustomEvent('snapshot', { detail: snapshot }));
+  }
+
+  sendMovement(input) {
+    const payload = { seq: this.nextInputSeq += 1, ...input };
+    this.inputHistory.add(payload);
+    if (this.localPlayer) this.localPlayer = predictMovement(this.localPlayer, payload, 1 / 30, getCharacterDef(this.localPlayer.characterId).speed, this.collision);
+    this.network.emit(CLIENT_EVENTS.inputMove, payload);
+    return payload.seq;
+  }
+
+  sendAttackStart(aimX, aimZ) {
+    const actionId = ++this.nextActionId;
+    this.network.emit(CLIENT_EVENTS.actionAttackStart, { actionId, aimX, aimZ });
+    return actionId;
+  }
+
+  sendAttackRelease(aimX, aimZ) {
+    const actionId = ++this.nextActionId;
+    this.network.emit(CLIENT_EVENTS.actionAttackRelease, { actionId, aimX, aimZ });
+    return actionId;
+  }
+
+  sendSuper(aimX, aimZ, targetX, targetZ) {
+    this.network.emit(CLIENT_EVENTS.actionSuper, { actionId: ++this.nextActionId, aimX, aimZ, targetX, targetZ });
+  }
+
+  sendItem() {
+    this.network.emit(CLIENT_EVENTS.actionItem, { actionId: ++this.nextActionId });
+  }
+
+  renderState(now = Date.now()) {
+    return this.stateBuffer.sample(now);
+  }
+}

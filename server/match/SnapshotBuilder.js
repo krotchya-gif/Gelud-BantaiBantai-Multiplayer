@@ -1,3 +1,5 @@
+import { getCharacterDef } from '../../shared/data/characters.js';
+
 export function buildSnapshot(simulation) {
   const { state } = simulation;
   const ack = {};
@@ -6,7 +8,9 @@ export function buildSnapshot(simulation) {
     ack[player.id] = player.lastProcessedInputSeq;
     players.push({
       id: player.id,
+      name: player.name,
       characterId: player.characterId,
+      characterName: getCharacterDef(player.characterId).name,
       x: Number(player.x.toFixed(4)),
       z: Number(player.z.toFixed(4)),
       velX: Number((player.velX || 0).toFixed(4)),
@@ -24,7 +28,15 @@ export function buildSnapshot(simulation) {
       parryT: Number((player.parryT || 0).toFixed(3)),
       slowT: Number((player.slowT || 0).toFixed(3)),
       speedBoostT: Number((player.speedBoostT || 0).toFixed(3)),
+      itemSpeedT: Number((player.itemSpeedT || 0).toFixed(3)),
       spawnProtectionT: Number((player.spawnProtectionT || 0).toFixed(3)),
+      ammo: player.ammo,
+      reloadT: Number((player.reloadT || 0).toFixed(3)),
+      flickerRemaining: Number(Math.max(0, (player.flickerReadyAt || 0) - state.match.elapsed).toFixed(3)),
+      flickerInvulnT: Number((player.flickerInvulnT || 0).toFixed(3)),
+      attackCooldown: Number((player.attackCooldown || 0).toFixed(3)),
+      comboStep: player.comboStep || 0,
+      burstT: Number((player.burstT || 0).toFixed(3)),
       charging: player.chargeStartedAt !== null,
     });
   }
@@ -42,6 +54,6 @@ export function buildSnapshot(simulation) {
     projectiles,
     items: [...state.items.values()].filter((item) => item.active).map(({ id, kind, x, z }) => ({ id, kind, x, z })),
     hazards: [...state.hazards.values()],
-    areaEffects: [...state.areaEffects.values()].map(({ id, ownerId, kind, x, z, radius, remaining }) => ({ id, ownerId, kind, x, z, radius, remaining })),
+    areaEffects: [...state.areaEffects.values()].map(({ id, ownerId, kind, x, z, radius, color, remaining }) => ({ id, ownerId, kind, x, z, radius, color, remaining })),
   };
 }

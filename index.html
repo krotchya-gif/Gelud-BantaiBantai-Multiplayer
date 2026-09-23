@@ -37,12 +37,17 @@
         <ol id="dm-leaderboard-list"></ol>
       </div>
       <div id="banner" class="outline"></div>
-      <div id="hints"><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> move &nbsp; <kbd>Mouse</kbd> aim &nbsp; <kbd>Click</kbd> shoot<br /><kbd>Space</kbd> / <kbd>Right-click</kbd> hold to aim super, release to fire<br /><kbd>F</kbd> use item &nbsp; <kbd>T</kbd> time of day &nbsp; <kbd>P</kbd> pause &nbsp; <kbd>M</kbd> mute</div>
+      <div id="hints"><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> move &nbsp; <kbd>Mouse</kbd> aim &nbsp; <kbd>Click</kbd> shoot<br /><kbd>Space</kbd> / <kbd>Right-click</kbd> hold to aim super, release to fire<br /><kbd>Shift</kbd> flicker &nbsp; <kbd>F</kbd> use item &nbsp; <kbd>T</kbd> time of day &nbsp; <kbd>P</kbd> pause &nbsp; <kbd>M</kbd> mute</div>
       <div id="sticks">
         <div class="stick" id="stick-move"><i></i><b>MOVE</b></div>
         <div class="stick" id="stick-aim"><i></i><b>DRAG TO AIM &middot; TAP TO AUTO-AIM</b></div>
       </div>
       <div id="action-cluster">
+        <button id="flicker-action" type="button" disabled aria-label="Flicker recharging" title="Flicker recharging">
+          <span class="flicker-icon" id="flicker-icon" aria-hidden="true">✦</span>
+          <span class="flicker-label" id="flicker-label">30s</span>
+          <span class="flicker-key" id="flicker-key">SHIFT</span>
+        </button>
         <div id="super"><div class="core" id="super-core">SUPER</div></div>
         <button id="item-action" type="button" disabled aria-label="No item held" title="No item held">
           <span class="item-icon" id="item-icon" aria-hidden="true">◇</span>
@@ -137,7 +142,7 @@
         <div class="room-code-display">ROOM <strong id="room-code-value">------</strong><button class="compact-btn" id="copy-room-code" type="button">COPY</button></div>
         <div id="room-player-list" class="room-player-list"></div>
         <div class="room-settings">
-          <label>CHARACTER <select id="room-character"><option value="dusty">DUSTY</option><option value="ace">ACE</option><option value="fuse">FUSE</option><option value="titan">TITAN</option><option value="volt">VOLT</option><option value="naka">NAKA</option><option value="ello">ELLO</option><option value="syafiah">SYAFIAH</option></select></label>
+          <label>CHARACTER <select id="room-character"><option value="dusty">ATHALLAH</option><option value="ace">ZEYD</option><option value="fuse">AZKA</option><option value="titan">EINAR</option><option value="volt">NOPAL</option><option value="naka">NAKA</option><option value="ello">ELLO</option><option value="syafiah">SYAFIAH</option></select></label>
           <label>MODE <select id="room-mode"><option value="deathmatch">DEATHMATCH</option><option value="classic">CLASSIC</option><option value="blitz">BLITZ</option></select></label>
           <label>MAP <select id="room-map" aria-label="Map room"></select></label>
         </div>

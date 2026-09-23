@@ -33,7 +33,7 @@ export class MapCollision {
     if (cell === cells.ICE) return 'ice';
     if (cell === cells.MUD) return 'mud';
     if (cell === cells.BUSH) return 'bush';
-    if (cell === cells.HAZARD) return 'hazard';
+    if (cell === cells.HAZARD) return this.metaAt(x, z)?.hazardType === 'low-gravity' ? 'low-gravity' : 'hazard';
     if (cell === cells.WATER) return 'water';
     return 'normal';
   }

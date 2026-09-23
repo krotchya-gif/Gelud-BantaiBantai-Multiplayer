@@ -12,8 +12,11 @@ export function predictMovement(player, input, dt, speed, collision, mapId = 'op
   let effectiveSpeed = speed * (gameplay.moveMultiplier ?? 1);
   if (affinity?.type === 'bush' && surface === 'bush') effectiveSpeed *= affinity.moveMultiplier;
   if (surface === 'mud') effectiveSpeed *= gameplay.mudMoveMultiplier ?? 1;
-  if (player.speedBoostT > 0) effectiveSpeed *= 1.35;
+  if (player.itemSpeedT > 0) effectiveSpeed *= 1.35;
+  if (player.speedBoostT > 0) effectiveSpeed *= 1.15;
   if (player.slowT > 0) effectiveSpeed *= 0.85;
+  if ((player.charging || player.chargeStartedAt != null || player.networkCharging) && player.characterId === 'syafiah') effectiveSpeed *= 0.88;
+  if (player.burstT > 0 && player.characterId !== 'ello') effectiveSpeed *= 0.82;
   let velX = direction.x * effectiveSpeed;
   let velZ = direction.z * effectiveSpeed;
   if (surface === 'ice') {

@@ -1,11 +1,51 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { io as connect } from 'socket.io-client';
+import { EventEmitter } from 'node:events';
+import { WebSocket } from 'ws';
 import { createGameServer } from '../../server/index.js';
 import { SERVER_EVENTS } from '../../shared/protocol/events.js';
 import { PROTOCOL_VERSION } from '../../shared/protocol/version.js';
 
 const apps = [];
 const clients = [];
+
+class TestClient {
+  constructor(url) {
+    this.events = new EventEmitter();
+    this.pendingAcks = new Map();
+    this.nextRequestId = 0;
+    this.socket = new WebSocket(`${url}/ws`);
+    this.socket.on('open', () => this.events.emit('connect'));
+    this.socket.on('message', (raw) => {
+      const frame = JSON.parse(raw.toString());
+      if (frame.type === 'ack') {
+        const ack = this.pendingAcks.get(frame.requestId);
+        this.pendingAcks.delete(frame.requestId);
+        ack?.(frame.payload);
+        return;
+      }
+      this.events.emit(frame.event, frame.payload);
+    });
+    this.socket.on('close', (code, reason) => this.events.emit('disconnect', reason?.toString() || `closed:${code}`));
+  }
+
+  on(event, handler) { this.events.on(event, handler); return this; }
+  once(event, handler) { this.events.once(event, handler); return this; }
+
+  emit(event, payload = {}, ack) {
+    if (typeof payload === 'function') {
+      ack = payload;
+      payload = {};
+    }
+    const frame = { type: 'event', event, payload };
+    if (typeof ack === 'function') {
+      frame.requestId = `test_${++this.nextRequestId}`;
+      this.pendingAcks.set(frame.requestId, ack);
+    }
+    this.socket.send(JSON.stringify(frame));
+  }
+
+  disconnect() { this.socket.close(); }
+}
 
 function once(socket, event) {
   return new Promise((resolve, reject) => {
@@ -18,7 +58,7 @@ function once(socket, event) {
 }
 
 async function makeClient(port, name) {
-  const socket = connect(`http://127.0.0.1:${port}`, { transports: ['websocket'] });
+  const socket = new TestClient(`ws://127.0.0.1:${port}`);
   clients.push(socket);
   await once(socket, 'connect');
   socket.emit('session:hello', { protocolVersion: PROTOCOL_VERSION, name });
@@ -30,7 +70,7 @@ afterEach(async () => {
   for (const client of clients.splice(0)) client.disconnect();
   for (const app of apps.splice(0)) {
     clearInterval(app.cleanupTimer);
-    app.socketServer.io.close();
+    app.socketServer.close();
     await new Promise((resolve) => app.httpServer.close(resolve));
   }
 });
@@ -137,7 +177,7 @@ describe('multiplayer lobby', () => {
     await new Promise((resolve) => setTimeout(resolve, 30));
     // Read the stable credentials from the server registry in this integration test only.
     const session = [...app.socketServer.registry.sessionsById.values()][0];
-    const second = connect(`http://127.0.0.1:${port}`, { transports: ['websocket'] });
+    const second = new TestClient(`ws://127.0.0.1:${port}`);
     clients.push(second);
     await once(second, 'connect');
     const recoveredPromise = once(second, SERVER_EVENTS.sessionRecovered);

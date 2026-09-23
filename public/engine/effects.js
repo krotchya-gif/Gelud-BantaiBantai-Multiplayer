@@ -778,7 +778,7 @@ var Nu = class {
         r = Math.abs(t) - (this.half - this.round);
       return Math.hypot(Math.max(n, 0), Math.max(r, 0)) + Math.min(Math.max(n, r), 0) - this.round;
     }
-    update(e, t) {
+    update(e, t, applyDamage = !0) {
       let n = this.game,
         r = $c((t - Lc.gasDelay) / Lc.gasDuration, 0, 1);
       ((this.active = t > Lc.gasDelay - 6),
@@ -811,7 +811,7 @@ var Nu = class {
             (r.uGlow.value = (0.55 + n.lighting.night * 0.3) * i),
             (r.uAlpha.value = Iu[layerIndex] * i));
         }),
-        !(t < Lc.gasDelay) && ((this.tickT += e), this.tickT >= 1))
+        applyDamage && !(t < Lc.gasDelay) && ((this.tickT += e), this.tickT >= 1))
       ) {
         (--this.tickT, this.ticks++);
         let e = 600 + Math.min(this.ticks, 60) * 25;

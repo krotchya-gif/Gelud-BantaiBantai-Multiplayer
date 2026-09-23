@@ -52,14 +52,16 @@ export class NetworkGameSession extends EventTarget {
     if (Number.isInteger(ack)) this.inputHistory.acknowledge(ack);
     const authoritative = snapshot.players?.find((player) => player.id === this.localPlayerId);
     if (authoritative && this.localPlayer) {
-      this.localPlayer = reconcile(authoritative, this.inputHistory.pending(), (player, input) => predictMovement(
-        player,
-        input,
-        1 / 30,
-        getCharacterDef(player.characterId).speed,
-        this.collision,
-        this.mapId,
-      ));
+      this.localPlayer = reconcile(authoritative, this.inputHistory.pending(), (player, input) => player.alive === false
+        ? player
+        : predictMovement(
+          player,
+          input,
+          1 / 30,
+          getCharacterDef(player.characterId).speed,
+          this.collision,
+          this.mapId,
+        ));
     }
     this.dispatchEvent(new CustomEvent('snapshot', { detail: snapshot }));
   }
@@ -73,7 +75,7 @@ export class NetworkGameSession extends EventTarget {
   }
 
   advancePrediction(dt) {
-    if (!this.localPlayer || !Number.isFinite(dt) || dt <= 0) return this.localPlayer;
+    if (!this.localPlayer || !this.localPlayer.alive || !Number.isFinite(dt) || dt <= 0) return this.localPlayer;
     this.localPlayer = predictMovement(
       this.localPlayer,
       this.latestInput,
@@ -103,6 +105,10 @@ export class NetworkGameSession extends EventTarget {
 
   sendItem() {
     this.network.emit(CLIENT_EVENTS.actionItem, { actionId: ++this.nextActionId });
+  }
+
+  sendFlicker(dirX, dirZ) {
+    this.network.emit(CLIENT_EVENTS.actionFlicker, { actionId: ++this.nextActionId, dirX, dirZ });
   }
 
   renderState(now = Date.now()) {

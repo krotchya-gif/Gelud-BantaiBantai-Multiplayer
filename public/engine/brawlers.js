@@ -300,7 +300,11 @@ function uu(e, t) {
     allMats: [...v, i, k],
   };
 }
-var du = 1,
+var FLICKER_COOLDOWN = 30,
+  FLICKER_DISTANCE = 2.2,
+  FLICKER_DURATION = 0.18,
+  FLICKER_INVULNERABILITY = 0.22,
+  du = 1,
   fu = class {
     constructor(e, t, n) {
       ((this.game = e),
@@ -335,8 +339,12 @@ var du = 1,
         this.root.add(this.superRing),
         (this.maxHp = t.hp),
         (this.hp = t.hp),
-        (this.ammo = 3),
+        (this.maxAmmo = t.maxAmmo || 3),
+        (this.ammo = this.maxAmmo),
         (this.reloadT = 0),
+        (this.flickerReadyAt = FLICKER_COOLDOWN),
+        (this.flickerInvulnT = 0),
+        (this.flicker = null),
         (this.superCharge = 0),
         (this.comboStep = 0),
         (this.comboResetT = 0),
@@ -405,6 +413,12 @@ var du = 1,
     get superReady() {
       return this.superCharge >= 1;
     }
+    get flickerRemaining() {
+      return Math.max(0, this.flickerReadyAt - this.game.matchTime);
+    }
+    get flickerReady() {
+      return this.flickerRemaining <= 0;
+    }
     get usesAmmo() {
       return this.def.id !== `ello` && this.def.id !== `syafiah`;
     }
@@ -439,7 +453,29 @@ var du = 1,
       return (e.set(this.x + n.x * r + n.z * i, n.y, this.z - n.x * i + n.z * r), e);
     }
     canAct() {
-      return this.alive && !this.leap && !this.dash && this.game.state !== `countdown`;
+      return this.alive && !this.leap && !this.dash && !this.flicker && this.game.state !== `countdown`;
+    }
+    useFlicker(e, t) {
+      if (!this.canAct() || this.burst || this.game.state !== `playing` || !this.flickerReady) return !1;
+      let n = Math.hypot(e || 0, t || 0);
+      n < 0.08 && ((e = Math.sin(this.facing)), (t = Math.cos(this.facing)), (n = 1));
+      (e /= n), (t /= n);
+      let r = FLICKER_DISTANCE,
+        i = this.game.world.raycast(this.x, this.z, this.x + e * r, this.z + t * r);
+      i && (r = Math.max(0, i.dist - 0.34));
+      if (r < 0.2) return !1;
+      let a = this.x,
+        o = this.z;
+      return ((this.flicker = { sx: a, sz: o, tx: a + e * r, tz: o + t * r, dx: e, dz: t, t: 0 }),
+        (this.flickerReadyAt = this.game.matchTime + FLICKER_COOLDOWN),
+        (this.flickerInvulnT = FLICKER_INVULNERABILITY),
+        (this.facing = Math.atan2(e, t)),
+        (this.aimAngle = this.facing),
+        (this.root.rotation.y = this.facing),
+        (this.squash = -0.35),
+        this.game.effects.dust(a, o, 6, 1.5),
+        this.game.audio.play(`zap`, a, o),
+        !0);
     }
     attack(e, t, n, r, chargeDuration) {
       if (!this.canAct() || (this.usesAmmo && this.ammo < 1) || this.fireCooldown > 0 || this.burst) return !1;
@@ -644,7 +680,7 @@ var du = 1,
         let key = projectile.attackId + `:` + target.id,
           count = (this.scatterHits.get(key) || 0) + 1;
         this.scatterHits.set(key, count);
-        if (count === 3 && this.ammo < 3) this.reloadT = Math.min(1, this.reloadT + 0.25 / this.def.reload);
+        if (count === 3 && this.ammo < this.maxAmmo) this.reloadT = Math.min(1, this.reloadT + 0.25 / this.def.reload);
         if (this.scatterHits.size > 48) this.scatterHits.clear();
       }
       if (this.def.id === `volt` && projectile.a.electric) {
@@ -666,7 +702,7 @@ var du = 1,
         !t && this.superReady && this.isPlayer && this.game.audio.play(`ready`));
     }
     takeDamage(e, t, n = !1, context = null) {
-      if (!this.alive || this.airborne || this.spawnT > 0) return 0;
+      if (!this.alive || this.airborne || this.spawnT > 0 || this.flickerInvulnT > 0) return 0;
       if (this.def.id === `ello` && this.parryT > 0 && t && context?.kind === `projectile`) {
         let faceX = Math.sin(this.facing),
           faceZ = Math.cos(this.facing),
@@ -734,7 +770,7 @@ var du = 1,
         case `heal`:
           return this.hp < this.maxHp;
         case `ammo`:
-          return this.usesAmmo ? this.ammo < 3 : !this.superReady;
+          return this.usesAmmo ? this.ammo < this.maxAmmo : !this.superReady;
         case `super`:
           return !this.superReady;
         default:
@@ -757,7 +793,7 @@ var du = 1,
           this.heal(this.maxHp * 0.35);
           break;
         case `ammo`:
-          if (this.usesAmmo) ((this.ammo = 3), (this.reloadT = 0));
+          if (this.usesAmmo) ((this.ammo = this.maxAmmo), (this.reloadT = 0));
           else this.addCharge(this.def.superCharge * 0.2, 1);
           break;
         case `super`:
@@ -780,7 +816,7 @@ var du = 1,
           (this.heldItem === `heal` && health <= 0.58) ||
           (this.heldItem === `shield` && health <= 0.72 && nearest <= 4) ||
           (this.heldItem === `speed` && nearest > 3.5 && nearest < 12) ||
-          (this.heldItem === `ammo` && (this.usesAmmo ? this.ammo <= 1 : this.superCharge <= 0.9)) ||
+          (this.heldItem === `ammo` && (this.usesAmmo ? this.ammo <= Math.max(1, this.maxAmmo * 0.4) : this.superCharge <= 0.9)) ||
           (this.heldItem === `super` && !this.superReady && this.superCharge <= 0.75 && nearest < 8);
       use && this.useHeldItem();
     }
@@ -831,6 +867,7 @@ var du = 1,
       }
       if (
         ((this.spawnT = Math.max(0, this.spawnT - e)),
+        (this.flickerInvulnT = Math.max(0, this.flickerInvulnT - e)),
         (this.parryT = Math.max(0, this.parryT - e)),
         (this.slowT = Math.max(0, this.slowT - e)),
         (this.speedBoostT = Math.max(0, this.speedBoostT - e)),
@@ -853,9 +890,9 @@ var du = 1,
         (this.punch[0] = nl(this.punch[0], 0, 16, e)),
         (this.punch[1] = nl(this.punch[1], 0, 16, e)),
         (this.squash = nl(this.squash, 0, 12, e)),
-        this.usesAmmo && this.ammo < 3
+        this.usesAmmo && this.ammo < this.maxAmmo
           ? ((this.reloadT += e / this.def.reload),
-            this.reloadT >= 1 && ((this.reloadT = 0), (this.ammo = Math.min(3, this.ammo + 1))))
+            this.reloadT >= 1 && ((this.reloadT = 0), (this.ammo = Math.min(this.maxAmmo, this.ammo + 1))))
           : (this.reloadT = 0),
         this.burst)
       ) {
@@ -892,7 +929,21 @@ var du = 1,
       }
       if (this.knockbackImmune) this.knock.set(0, 0);
       let r = this.root.position;
-      if (this.dash) {
+      if (this.flicker) {
+        let flicker = this.flicker;
+        flicker.t += e;
+        let amount = $c(flicker.t / FLICKER_DURATION, 0, 1);
+        amount = amount * amount * (3 - 2 * amount);
+        ((r.x = el(flicker.sx, flicker.tx, amount)),
+          (r.z = el(flicker.sz, flicker.tz, amount)),
+          this.vel.set(flicker.dx * FLICKER_DISTANCE, flicker.dz * FLICKER_DISTANCE),
+          t.world.resolveCircle(r, Ic));
+        if (flicker.t >= FLICKER_DURATION) {
+          this.flicker = null;
+          this.vel.set(0, 0);
+          this.squash = 1.1;
+        }
+      } else if (this.dash) {
         let dash = this.dash;
         dash.t += e;
         let amount = $c(dash.t / dash.duration, 0, 1);

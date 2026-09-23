@@ -1,9 +1,10 @@
 import { lerp } from '../../shared/utils/math.js';
 
 export class StateBuffer {
-  constructor({ delayMs = 100, maxSnapshots = 32 } = {}) {
+  constructor({ delayMs = 100, maxSnapshots = 32, maxExtrapolationMs = 90 } = {}) {
     this.delayMs = delayMs;
     this.maxSnapshots = maxSnapshots;
+    this.maxExtrapolationMs = maxExtrapolationMs;
     this.snapshots = [];
   }
 
@@ -31,8 +32,30 @@ export class StateBuffer {
     }
     const span = after.receivedAt - before.receivedAt;
     const amount = span > 0 ? Math.max(0, Math.min(1, (target - before.receivedAt) / span)) : 1;
-    return interpolateSnapshot(before.snapshot, after.snapshot, amount);
+    const sampled = interpolateSnapshot(before.snapshot, after.snapshot, amount);
+    const extrapolationMs = Math.max(0, Math.min(this.maxExtrapolationMs, target - after.receivedAt));
+    return extrapolationMs > 0 ? extrapolateSnapshot(sampled, extrapolationMs / 1000) : sampled;
   }
+}
+
+function extrapolateSnapshot(snapshot, seconds) {
+  return {
+    ...snapshot,
+    players: (snapshot.players || []).map((player) => ({
+      ...player,
+      x: player.x + (player.velX || 0) * seconds,
+      z: player.z + (player.velZ || 0) * seconds,
+    })),
+    projectiles: (snapshot.projectiles || []).map((projectile) => ({
+      ...projectile,
+      x: Number.isFinite(projectile.dirX) && Number.isFinite(projectile.speed)
+        ? projectile.x + projectile.dirX * projectile.speed * seconds
+        : projectile.x,
+      z: Number.isFinite(projectile.dirZ) && Number.isFinite(projectile.speed)
+        ? projectile.z + projectile.dirZ * projectile.speed * seconds
+        : projectile.z,
+    })),
+  };
 }
 
 function interpolateSnapshot(first, second, amount) {

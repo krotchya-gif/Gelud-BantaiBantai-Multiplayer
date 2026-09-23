@@ -1,7 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import { MAP_DEFINITIONS } from '../../shared/maps/MapDefinitions.js';
+import { CHARACTER_IDS, getCharacterDef } from '../../shared/data/characters.js';
 
-const VALID_CHARACTERS = new Set(['dusty', 'ace', 'fuse', 'titan', 'volt', 'naka', 'ello', 'syafiah']);
+const VALID_CHARACTERS = new Set(CHARACTER_IDS);
 
 export class Room {
   constructor({ code, maxPlayers = 8, mode = 'deathmatch', mapId = 'open', now = Date.now() }) {
@@ -28,7 +29,7 @@ export class Room {
     const record = {
       id: playerId,
       name: player.name,
-      characterId: player.characterId || 'dusty',
+      characterId: VALID_CHARACTERS.has(player.characterId) ? player.characterId : 'dusty',
       ready: false,
       connected: true,
       joinedAt: player.joinedAt || Date.now(),
@@ -98,7 +99,7 @@ export class Room {
       status: this.status,
       settings: { ...this.settings },
       players: [...this.players.values()].map(({ id, name, characterId, ready, connected }) => ({
-        id, name, characterId, ready, connected,
+        id, name, characterId, characterName: getCharacterDef(characterId).name, ready, connected,
       })),
     };
   }

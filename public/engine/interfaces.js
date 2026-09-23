@@ -23,7 +23,11 @@ var  Ru = 9,
         (this.jitterT = 0),
         (this.jx = 0),
         (this.jz = 0),
-        (this.wanderT = 0));
+        (this.wanderT = 0),
+        // Acquire an opponent immediately after spawn. Once a target is
+        // locked, pathfinding can lead the bot through map cover instead of
+        // waiting for line-of-sight or for the player to approach.
+        (this.spawnHuntT = 12));
       let [n, r] = e.difficulty.skill;
       ((this.skill = Q(n, r)), (this.thrower = t.def.attack.kind === `lob`));
     }
@@ -45,17 +49,15 @@ var  Ru = 9,
       let { b: e, game: t } = this,
         n = t.world,
         r = t.gas,
-        i = t.state !== `menu` && t.matchTime < 14 && t.elapsed - e.lastCombat > 2.5,
         a = null,
-        o = i ? 3.5 : 1 / 0,
-        targetLimit = o,
+        o = 1 / 0,
         bestScore = 1 / 0;
       for (let n of t.brawlers) {
         if (n === e || !n.alive || n.airborne) continue;
         let r = sl(e.x, e.z, n.x, n.z),
           i = e.lastAttacker === n && t.elapsed - e.lastHitTime < 4;
           if (t.modeName !== `deathmatch` && !n.isPlayer && !i && r > zu) continue;
-          if (t.modeName !== `deathmatch` && n.isPlayer && !i && this.target !== n) {
+          if (t.modeName !== `deathmatch` && n.isPlayer && !i && this.target !== n && this.spawnHuntT <= 0) {
             let e = t.difficulty;
             if (
               r > e.engage ||
@@ -64,8 +66,10 @@ var  Ru = 9,
             )
               continue;
           }
-        let score = r * (0.62 + (n.hp / n.maxHp) * 0.38) * (i ? 0.7 : 1);
-        r < targetLimit && score < bestScore && this.canSee(n, r) && ((a = n), (o = r), (bestScore = score));
+        let score = r * (0.62 + (n.hp / n.maxHp) * 0.38) * (i ? 0.7 : 1),
+          targetVisible = this.canSee(n, r) ||
+            ((this.spawnHuntT > 0 || t.modeName === `deathmatch` || n === this.target) && !n.inBush);
+        score < bestScore && targetVisible && ((a = n), (o = r), (bestScore = score));
       }
       (a !== this.target && (this.reactT = Q(0.22, 0.5) * (2 - this.skill) * t.difficulty.react), (this.target = a));
       let s = r.active ? r.depthAt(e.x, e.z) : -99,
@@ -224,6 +228,7 @@ var  Ru = 9,
         return;
       }
       ((this.thinkT -= e),
+        (this.spawnHuntT = Math.max(0, this.spawnHuntT - e)),
         this.thinkT <= 0 && ((this.thinkT = 0.3), this.think()),
         (this.reactT = Math.max(0, this.reactT - e)),
         (this.shootT -= e));
@@ -277,6 +282,15 @@ var  Ru = 9,
       }
       this.jitterT > 0 && ((this.jitterT -= e), (a = this.jx), (o = this.jz));
       (([a, o] = this.avoidDanger(a, o)));
+      if (t.flickerReady && (n.combat.incomingBullet(t, 0.28) || (s && sl(t.x, t.z, s.x, s.z) < 2.8))) {
+        let flickerX = a,
+          flickerZ = o;
+        if (Math.hypot(flickerX, flickerZ) < 0.08 && s) {
+          flickerX = t.x - s.x;
+          flickerZ = t.z - s.z;
+        }
+        t.useFlicker(flickerX, flickerZ) && (this.shootT = Math.max(this.shootT, 0.28));
+      }
       let c = Math.hypot(a, o);
       if (((t.moveX = c > 0.01 ? a / c : 0), (t.moveZ = c > 0.01 ? o / c : 0), s && this.reactT <= 0 && !s.airborne)) {
         let e = sl(t.x, t.z, s.x, s.z),
@@ -358,6 +372,7 @@ var  Ru = 9,
         (this.fireReleasedDuration = null),
         (this.superHeld = !1),
         (this.superReleased = !1),
+        (this.flickerPressed = !1),
         (this.enabled = !0),
         (this.touchMode = !1),
         (this.onTouchMode = null),
@@ -370,6 +385,7 @@ var  Ru = 9,
         let t = Uu(e);
         (this.keys.add(t),
           n.has(t) && ((this.superHeld = !0), e.preventDefault()),
+          (t === `ShiftLeft` || t === `ShiftRight`) && ((this.flickerPressed = !0), e.preventDefault()),
           t.startsWith(`Arrow`) && e.preventDefault());
       }),
         window.addEventListener(`keyup`, (e) => {
@@ -496,6 +512,10 @@ var  Ru = 9,
       let e = this.superReleased;
       return ((this.superReleased = !1), e);
     }
+    consumeFlicker() {
+      let e = this.flickerPressed;
+      return ((this.flickerPressed = !1), e);
+    }
     consumeFireRelease() {
       let e = this.fireReleasedDuration;
       return ((this.fireReleasedDuration = null), e);
@@ -507,6 +527,7 @@ var  Ru = 9,
         (this.fireReleasedDuration = null),
         (this.superHeld = !1),
         (this.superReleased = !1),
+        (this.flickerPressed = !1),
         (this.shots.length = 0));
       for (let e of Object.values(this.sticks)) this.resetStick(e);
     }
@@ -556,6 +577,7 @@ var  Ru = 9,
         (this.lastKillLine = ``),
         (this.lastSuper = -1),
         (this.lastItemUi = ``),
+        (this.lastFlickerUi = ``),
         (this.statsT = 0),
         (this.frames = 0),
         (this.fps = 0),
@@ -565,7 +587,7 @@ var  Ru = 9,
         this.buildSettings());
     }
     setTouchMode(e) {
-      ((this.touch = e), document.body.classList.toggle(`touch`, e), (this.lastSuper = -1), (this.lastItemUi = ``));
+      ((this.touch = e), document.body.classList.toggle(`touch`, e), (this.lastSuper = -1), (this.lastItemUi = ``), (this.lastFlickerUi = ``));
     }
     updateSticks() {
       if (!this.touch) return;
@@ -815,7 +837,7 @@ var  Ru = 9,
       ((t.className = `oh` + (e.isPlayer ? ` me` : ``)),
         (t.innerHTML = `<div class="oh-name"><span class="n"></span><span class="oh-cubes"></span></div>
       <div class="oh-bar"><div class="oh-fill"></div><span class="oh-hp"></span></div>
-      ${e.isPlayer && e.usesAmmo ? `<div class="oh-ammo"><i><b></b></i><i><b></b></i><i><b></b></i></div>` : ``}`),
+      ${e.isPlayer && e.usesAmmo ? `<div class="oh-ammo">${Array.from({ length: e.maxAmmo || 3 }, () => `<i><b></b></i>`).join(``)}</div>` : ``}`),
         (t.querySelector(`.n`).textContent = e.name),
         this.overheadLayer.appendChild(t),
         this.overheads.set(e.id, {
@@ -827,7 +849,7 @@ var  Ru = 9,
           lastHp: -1,
           lastMax: -1,
           lastCubes: -1,
-          lastAmmo: [-1, -1, -1],
+          lastAmmo: new Array(e.maxAmmo || 3).fill(-1),
           shown: !0,
         }));
     }
@@ -944,7 +966,7 @@ var  Ru = 9,
             ((t.lastCubes = e.cubes), (t.cubes.textContent = e.cubes > 0 ? `⚡${e.cubes}` : ``)),
           e.isPlayer && e.usesAmmo)
         )
-          for (let n = 0; n < 3; n++) {
+          for (let n = 0; n < t.ammo.length; n++) {
             let r = $c(e.ammo - n + (Math.floor(e.ammo) === n ? e.reloadT : 0), 0, 1),
               i = Math.round(r * 40);
             i !== t.lastAmmo[n] &&
@@ -992,6 +1014,7 @@ var  Ru = 9,
       let a = t.player,
         o = a ? Math.round(a.superCharge * 100) : 0;
       this.syncItemButton(a);
+      this.syncFlickerButton(a);
       if (o !== this.lastSuper) {
         this.lastSuper = o;
         let e = $(`super`);
@@ -1064,6 +1087,22 @@ var  Ru = 9,
         (button.disabled = !canUse),
         button.setAttribute(`aria-label`, item ? `${meta.label}. ${meta.title}${canUse ? `. Activate now` : `. Not available yet`}` : `No item held`),
         (button.title = item ? `${meta.title} — ${this.touch ? `tap to use` : `press F to use`}` : `No item held`));
+    }
+    syncFlickerButton(player) {
+      let button = $(`flicker-action`),
+        remaining = Number.isFinite(player?.flickerRemaining) ? player.flickerRemaining : 30,
+        ready = !!player && player.alive && this.game.state === `playing` && !this.game.paused && remaining <= 0.001,
+        progress = Math.round($c(1 - remaining / 30, 0, 1) * 100),
+        signature = `${ready}:${Math.ceil(remaining * 10)}:${this.touch}`;
+      if (signature === this.lastFlickerUi) return;
+      this.lastFlickerUi = signature;
+      button.style.setProperty(`--p`, progress);
+      button.classList.toggle(`ready`, ready);
+      button.disabled = !ready;
+      $(`flicker-label`).textContent = ready ? `FLICKER` : `${Math.ceil(remaining)}s`;
+      $(`flicker-key`).textContent = this.touch ? `TAP` : `SHIFT`;
+      button.setAttribute(`aria-label`, ready ? `Flicker ready. ${this.touch ? `Tap` : `Press Shift`} to dodge` : `Flicker recharging. ${Math.ceil(remaining)} seconds remaining`);
+      button.title = ready ? `${this.touch ? `Tap` : `Press Shift`} to dodge` : `Flicker recharging — ${Math.ceil(remaining)}s`;
     }
   },
   Xu = class {

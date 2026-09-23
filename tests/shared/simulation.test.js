@@ -12,6 +12,23 @@ describe('GameSimulation', () => {
     expect(player.facing).toBeCloseTo(Math.PI / 2);
   });
 
+  it('consumes bursty network inputs one per authoritative tick', () => {
+    const simulation = new GameSimulation({ players: [{ id: 'p1', name: 'A', characterId: 'dusty' }] });
+    simulation.setInput('p1', { seq: 1, moveX: 1, moveZ: 0, aimX: 1, aimZ: 0 });
+    simulation.setInput('p1', { seq: 2, moveX: 0, moveZ: 1, aimX: 0, aimZ: 1 });
+
+    simulation.tick(1 / 30);
+    const first = simulation.state.players.get('p1');
+    expect(first.lastProcessedInputSeq).toBe(1);
+    expect(first.x).toBeGreaterThan(0);
+    expect(first.z).toBe(0);
+
+    simulation.tick(1 / 30);
+    const second = simulation.state.players.get('p1');
+    expect(second.lastProcessedInputSeq).toBe(2);
+    expect(second.z).toBeGreaterThan(0);
+  });
+
   it('keeps attack authority in the simulation and emits projectile events', () => {
     const simulation = new GameSimulation({ players: [{ id: 'p1', name: 'A', characterId: 'naka' }] });
     expect(simulation.attackStart('p1', 1, 0)).toBe(true);

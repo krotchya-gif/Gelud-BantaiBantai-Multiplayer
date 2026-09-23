@@ -2,6 +2,7 @@ import { NetworkClient } from './NetworkClient.js';
 import { NetworkGameSession } from './NetworkGameSession.js';
 import { CLIENT_EVENTS, SERVER_EVENTS } from '../../shared/protocol/events.js';
 import { MAP_DEFINITIONS } from '../../shared/maps/MapDefinitions.js';
+import { getCharacterDef } from '../../shared/data/characters.js';
 
 const byId = (id) => document.getElementById(id);
 const menu = byId('menu');
@@ -38,6 +39,7 @@ function populateMapSelect(select) {
 
 populateMapSelect(mapInput);
 populateMapSelect(createMapInput);
+for (const option of characterInput?.options || []) option.textContent = getCharacterDef(option.value).name;
 
 function ensureClient() {
   if (client) return client;
@@ -139,7 +141,8 @@ function renderRoom() {
     const name = document.createElement('strong');
     name.textContent = player.name;
     const details = document.createElement('span');
-    details.textContent = `${player.characterId.toUpperCase()} · ${player.ready ? 'READY' : 'NOT READY'}${player.id === currentRoom.hostPlayerId ? ' · HOST' : ''}`;
+    const characterName = player.characterName || getCharacterDef(player.characterId).name;
+    details.textContent = `${characterName} · ${player.ready ? 'READY' : 'NOT READY'}${player.id === currentRoom.hostPlayerId ? ' · HOST' : ''}`;
     row.append(name, details);
     playerList.append(row);
   }

@@ -1,8 +1,9 @@
 import { SeededRng } from '../utils/rng.js';
 import { MapCollision } from '../maps/MapCollision.js';
+import { characterMaxAmmo, characterUsesAmmo, getCharacterDef } from '../data/characters.js';
 import { createSimulationState } from './SimulationState.js';
 import { stepMovement } from './MovementSystem.js';
-import { beginAttack, releaseAttack, stepAreaEffects, stepItems, stepProjectiles, useItem, useSuper, applyDamage } from './CombatSystem.js';
+import { beginAttack, releaseAttack, resolveIaido, stepAreaEffects, stepBursts, stepItems, stepProjectiles, useFlicker, useItem, useSuper, applyDamage } from './CombatSystem.js';
 
 export class GameSimulation {
   constructor(options = {}) {
@@ -13,17 +14,47 @@ export class GameSimulation {
     this.events = [];
   }
 
+  stepWeaponState(dt) {
+    for (const player of this.state.players.values()) {
+      player.attackCooldown = Math.max(0, player.attackCooldown - dt);
+      if (player.comboResetT > 0) {
+        player.comboResetT = Math.max(0, player.comboResetT - dt);
+        if (player.comboResetT === 0) player.comboStep = 0;
+      }
+      const character = getCharacterDef(player.characterId);
+      const maxAmmo = characterMaxAmmo(player.characterId);
+      if (characterUsesAmmo(player.characterId) && player.ammo < maxAmmo) {
+        player.reloadT += dt / Math.max(0.01, character.reload || 1);
+        if (player.reloadT >= 1) {
+          player.reloadT = 0;
+          player.ammo = Math.min(maxAmmo, player.ammo + 1);
+        }
+      } else {
+        player.reloadT = 0;
+      }
+    }
+  }
+
   setInput(playerId, input) {
     const player = this.state.players.get(playerId);
     if (!player) return false;
-    player.input = {
+    const seq = Number.isInteger(input.seq) ? input.seq : player.lastReceivedInputSeq + 1;
+    if (seq <= player.lastReceivedInputSeq) return true;
+    const normalized = {
       ...player.input,
       ...input,
+      seq,
       moveX: Number.isFinite(input.moveX) ? Math.max(-1, Math.min(1, input.moveX)) : 0,
       moveZ: Number.isFinite(input.moveZ) ? Math.max(-1, Math.min(1, input.moveZ)) : 0,
       aimX: Number.isFinite(input.aimX) ? Math.max(-1, Math.min(1, input.aimX)) : player.input.aimX,
       aimZ: Number.isFinite(input.aimZ) ? Math.max(-1, Math.min(1, input.aimZ)) : player.input.aimZ,
     };
+    player.lastReceivedInputSeq = seq;
+    // Keep the latest received intent available to diagnostics and bot logic;
+    // movement itself still consumes the queued value at the simulation tick.
+    player.input = normalized;
+    player.pendingInputs.push(normalized);
+    if (player.pendingInputs.length > 120) player.pendingInputs.splice(0, player.pendingInputs.length - 120);
     return true;
   }
 
@@ -47,6 +78,10 @@ export class GameSimulation {
     return useItem(this.state, playerId);
   }
 
+  flicker(playerId, payload) {
+    return useFlicker(this.state, playerId, payload);
+  }
+
   tick(dt) {
     if (this.state.match.status !== 'running') return [];
     const queuedEvents = this.state.events;
@@ -55,10 +90,27 @@ export class GameSimulation {
     this.state.match.elapsed += dt;
     this.state.match.remaining = Math.max(0, this.state.match.remaining - dt);
     this.events = queuedEvents;
+    this.stepWeaponState(dt);
     for (const player of this.state.players.values()) {
-      player.attackCooldown = Math.max(0, player.attackCooldown - dt);
       player.deadT += player.alive ? 0 : dt;
+      const wasParrying = player.parryT > 0;
       player.parryT = Math.max(0, (player.parryT || 0) - dt);
+      player.flickerInvulnT = Math.max(0, (player.flickerInvulnT || 0) - dt);
+      if (player.parryT === 0 && player.iaidoState && player.alive && (wasParrying || player.iaidoEmpowered)) resolveIaido(this.state, player);
+      if (player.alive && player.hp < player.maxHp && this.state.match.elapsed - player.lastCombat > 3) {
+        player.regenT += dt;
+        if (player.regenT >= 1) {
+          player.regenT = 0;
+          player.hp = Math.min(player.maxHp, player.hp + Math.round(player.maxHp * 0.13));
+        }
+      } else {
+        player.regenT = 0;
+      }
+    }
+    stepBursts(this.state, dt);
+    for (const player of this.state.players.values()) {
+      const nextInput = player.pendingInputs.shift();
+      if (nextInput) player.input = nextInput;
     }
     stepMovement(this.state, dt, this.collision);
     stepProjectiles(this.state, dt);
@@ -79,14 +131,24 @@ export class GameSimulation {
       const delay = match.mode === 'blitz' ? 10 : 26;
       const duration = match.mode === 'blitz' ? 78 : 140;
       if (match.elapsed > delay) radius = Math.max(4, 24 - ((match.elapsed - delay) / duration) * 20);
-      this.state.hazards.set('gas', { kind: 'gas', radius: radius || 24 });
+      this.state.hazards.set('gas', { kind: 'gas', radius: radius || 24, active: radius !== null });
+      if (match.elapsed >= delay) {
+        match.gasTickT += dt;
+        while (match.gasTickT >= 1) {
+          match.gasTickT -= 1;
+          match.gasTicks += 1;
+          const damage = 600 + Math.min(match.gasTicks, 60) * 25;
+          for (const player of this.state.players.values()) {
+            if (player.alive && radius !== null && Math.hypot(player.x, player.z) > radius) applyDamage(this.state, player, damage, null);
+          }
+        }
+      }
     }
     for (const player of this.state.players.values()) {
       if (!player.alive) continue;
-      if (radius !== null && Math.hypot(player.x, player.z) > radius) applyDamage(this.state, player, (match.mode === 'blitz' ? 220 : 150) * dt, null);
       const terrainHazard = this.collision.hazardAt?.(player.x, player.z);
-      if (terrainHazard === 'lava') applyDamage(this.state, player, 180 * dt, null);
-      else if (terrainHazard === 'toxic') applyDamage(this.state, player, 90 * dt, null);
+      if (terrainHazard === 'lava') applyDamage(this.state, player, 900 * dt, null);
+      else if (terrainHazard === 'toxic') applyDamage(this.state, player, 260 * dt, null);
     }
   }
 
@@ -97,7 +159,9 @@ export class GameSimulation {
       const point = this.state.spawnPoints[this.state.nextSpawnIndex % this.state.spawnPoints.length];
       this.state.nextSpawnIndex += 1;
       player.x = point.x; player.z = point.z; player.hp = player.maxHp; player.alive = true;
-      player.spawnProtectionT = 1; player.deadT = 0; player.heldItem = null; player.shieldT = 0; player.speedBoostT = 0; player.slowT = 0;
+      player.spawnProtectionT = this.state.match.spawnProtection; player.deadT = 0; player.heldItem = null; player.shieldT = 0; player.speedBoostT = 0; player.itemSpeedT = 0; player.slowT = 0;
+      player.superCharge = 0; player.ammo = characterMaxAmmo(player.characterId); player.reloadT = 0; player.attackCooldown = 0; player.burstT = 0; player.burstState = null; player.comboStep = 0; player.comboResetT = 0; player.iaidoState = null; player.iaidoEmpowered = false; player.flickerInvulnT = 0; player.flickerState = null;
+      player.velX = 0; player.velZ = 0; player.input.moveX = 0; player.input.moveZ = 0; player.lastCombat = this.state.match.elapsed;
       player.chargeStartedAt = null;
       this.state.events.push({ type: 'RESPAWN', playerId: player.id, x: player.x, z: player.z });
     }

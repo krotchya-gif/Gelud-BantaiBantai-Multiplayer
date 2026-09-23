@@ -1,5 +1,6 @@
-# Use this file with a named tunnel when the VPS is managed by config.yml.
-# Keep tunnel credentials outside the repository.
+# Optional named-tunnel configuration.
+# deployment/docker-compose.yml uses token mode and does not mount this file.
+# If this file is used instead, keep tunnel credentials outside the repository.
 tunnel: 96fb86d8-40cd-450e-b10f-407a681b305c
 credentials-file: /etc/cloudflared/96fb86d8-40cd-450e-b10f-407a681b305c.json
 

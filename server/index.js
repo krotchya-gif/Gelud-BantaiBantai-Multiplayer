@@ -5,7 +5,7 @@ import { healthPayload } from './http/health.js';
 import { createLogger } from './observability/logger.js';
 import { RoomManager } from './rooms/RoomManager.js';
 import { loadServerConfig } from './config.js';
-import { SocketServer } from './network/SocketServer.js';
+import { WebSocketServer } from './network/SocketServer.js';
 
 export function createGameServer({ config: configInput, logger: loggerInput } = {}) {
   const config = { ...loadServerConfig(), ...(configInput || {}) };
@@ -26,7 +26,7 @@ export function createGameServer({ config: configInput, logger: loggerInput } = 
     response.writeHead(404, { 'content-type': 'application/json; charset=utf-8' });
     response.end(JSON.stringify({ error: 'Not found' }));
   });
-  const socketServer = new SocketServer(httpServer, { config, roomManager, logger });
+  const socketServer = new WebSocketServer(httpServer, { config, roomManager, logger });
   registry.sessionsBySocketId = socketServer.registry.sessionsBySocketId;
   // Keep the room manager cleanup independent from socket traffic.
   const cleanupTimer = setInterval(() => roomManager.cleanup(), 1000);

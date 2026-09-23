@@ -1,9 +1,11 @@
-import { Server } from 'socket.io';
+import { randomUUID } from 'node:crypto';
+import { WebSocket, WebSocketServer as NativeWebSocketServer } from 'ws';
 import { CLIENT_EVENTS, ROOM_ERRORS, SERVER_EVENTS } from '../../shared/protocol/events.js';
 import { PROTOCOL_VERSION } from '../../shared/protocol/version.js';
 import {
   attackReleaseSchema,
   attackStartSchema,
+  flickerSchema,
   moveInputSchema,
   readySchema,
   roomCreateSchema,
@@ -34,7 +36,10 @@ const ERROR_MESSAGES = Object.freeze({
   PROTOCOL_MISMATCH: 'Versi game berbeda. Muat ulang game.',
 });
 
-export class SocketServer {
+// The game uses one plain JSON WebSocket connection. Cloudflare Tunnel
+// forwards the HTTPS/WSS upgrade to this server on port 3200; there is no
+// protocol handshake, polling fallback, or external room adapter here.
+export class WebSocketServer {
   constructor(httpServer, { config, roomManager, logger = console } = {}) {
     this.config = config;
     this.roomManager = roomManager;
@@ -44,21 +49,31 @@ export class SocketServer {
     this.helloLimiter = new RateLimiter({ limit: 5 });
     this.roomLimiter = new RateLimiter({ limit: 5 });
     this.activeMatches = new Map();
-    const allowedOrigins = config.gameOrigin.split(',').map((origin) => origin.trim()).filter(Boolean);
-    this.io = new Server(httpServer, {
-      cors: {
-        origin: (origin, callback) => {
-          if (!origin || allowedOrigins.includes('*') || allowedOrigins.includes(origin)) return callback(null, true);
-          return callback(new Error('Origin not allowed'));
-        },
-        methods: ['GET', 'POST'],
-      },
-      maxHttpBufferSize: 32 * 1024,
-    });
-    this.io.on('connection', (socket) => this.onConnection(socket));
+    this.connections = new Map();
+    this.allowedOrigins = config.gameOrigin.split(',').map((origin) => origin.trim()).filter(Boolean);
+    this.wsServer = new NativeWebSocketServer({ noServer: true, maxPayload: 32 * 1024 });
+    this.handleUpgrade = (request, networkSocket, head) => {
+      const origin = request.headers.origin;
+      const pathname = new URL(request.url || '/', 'http://localhost').pathname;
+      const originAllowed = !origin || this.allowedOrigins.includes('*') || this.allowedOrigins.includes(origin);
+      const pathAllowed = pathname === '/' || pathname === '/ws';
+      if (!originAllowed || !pathAllowed) {
+        networkSocket.write('HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n');
+        networkSocket.destroy();
+        return;
+      }
+      this.wsServer.handleUpgrade(request, networkSocket, head, (rawSocket) => {
+        this.wsServer.emit('connection', rawSocket, request);
+      });
+    };
+    this.wsServer.on('connection', (rawSocket, request) => this.onConnection(rawSocket, request));
+    this.wsServer.on('error', (error) => this.logger.error?.({ err: error }, 'websocket server error'));
+    httpServer.on('upgrade', this.handleUpgrade);
   }
 
-  onConnection(socket) {
+  onConnection(rawSocket, request) {
+    const socket = this.createConnection(rawSocket, request);
+    this.connections.set(socket.id, socket);
     let session = null;
     let greeted = false;
     const requireSession = () => {
@@ -105,7 +120,6 @@ export class SocketServer {
       if (session.roomId) {
         const room = this.roomManager.findById(session.roomId);
         if (room?.players.has(session.playerId)) {
-          socket.join(room.id);
           room.players.get(session.playerId).connected = true;
           this.activeMatches.get(room.id)?.setPlayerConnected(session.playerId, true);
           socket.emit(SERVER_EVENTS.sessionRecovered, { room: room.toPublicState() });
@@ -119,13 +133,12 @@ export class SocketServer {
       if (!requireSession() || !this.roomLimiter.allow(session.playerId)) return;
       const data = validate(roomCreateSchema, payload);
       if (!data) return;
-      if (session.roomId) this.leaveCurrentRoom(session, socket);
+      if (session.roomId) this.leaveCurrentRoom(session);
       const room = this.roomManager.createRoom(session, {
         ...data,
         maxPlayers: Math.min(data.maxPlayers, this.config.maxPlayersPerRoom),
       });
       session.roomId = room.id;
-      socket.join(room.id);
       socket.emit(SERVER_EVENTS.roomJoined, { room: room.toPublicState(), playerId: session.playerId });
       this.broadcastRoom(room);
     });
@@ -137,10 +150,9 @@ export class SocketServer {
       const room = this.roomManager.findByCode(data.code);
       if (!room) return this.sendError(socket, ROOM_ERRORS.roomNotFound, ERROR_MESSAGES.ROOM_NOT_FOUND);
       try {
-        if (session.roomId) this.leaveCurrentRoom(session, socket);
+        if (session.roomId) this.leaveCurrentRoom(session);
         room.addPlayer(session);
         session.roomId = room.id;
-        socket.join(room.id);
         socket.emit(SERVER_EVENTS.roomJoined, { room: room.toPublicState(), playerId: session.playerId });
         this.broadcastRoom(room);
         this.logger.info?.({ roomId: room.id, playerId: session.playerId }, 'room join');
@@ -149,9 +161,9 @@ export class SocketServer {
       }
     });
 
-    const leaveRoom = (ack) => {
+    const leaveRoom = (payload, ack) => {
       if (!requireSession()) return;
-      this.leaveCurrentRoom(session, socket);
+      this.leaveCurrentRoom(session);
       if (typeof ack === 'function') ack({ ok: true });
     };
     socket.on(CLIENT_EVENTS.roomLeave, leaveRoom);
@@ -195,7 +207,7 @@ export class SocketServer {
       if (!room) return this.sendError(socket, ROOM_ERRORS.notInRoom, ERROR_MESSAGES.NOT_IN_ROOM);
       try {
         room.startMatch(session.playerId);
-        const runner = new MatchRunner({ room, io: this.io, config: this.config, logger: this.logger });
+        const runner = new MatchRunner({ room, transport: this, config: this.config, logger: this.logger });
         runner.onFinished = () => this.activeMatches.delete(room.id);
         room.match = runner;
         this.activeMatches.set(room.id, runner);
@@ -230,6 +242,7 @@ export class SocketServer {
       if (!runner) return this.sendError(socket, 'MATCH_NOT_READY', 'Match belum dimulai.');
       if (!runner.acceptAttackStart(session.playerId, data.aimX, data.aimZ)) this.sendError(socket, 'ACTION_REJECTED', 'Serangan belum dapat digunakan.');
     });
+
     socket.on(CLIENT_EVENTS.actionAttackRelease, (payload = {}) => {
       if (!requireSession()) return;
       const data = validate(attackReleaseSchema, payload);
@@ -240,6 +253,7 @@ export class SocketServer {
       if (!runner) return this.sendError(socket, 'MATCH_NOT_READY', 'Match belum dimulai.');
       if (!runner.acceptAttackRelease(session.playerId, data.aimX, data.aimZ)) this.sendError(socket, 'ACTION_REJECTED', 'Serangan belum dapat digunakan.');
     });
+
     socket.on(CLIENT_EVENTS.actionSuper, (payload = {}) => {
       if (!requireSession()) return;
       const data = validate(superSchema, payload);
@@ -250,6 +264,7 @@ export class SocketServer {
       if (!runner) return this.sendError(socket, 'MATCH_NOT_READY', 'Match belum dimulai.');
       if (!runner.acceptSuper(session.playerId, data)) this.sendError(socket, 'ACTION_REJECTED', 'Super belum siap atau posisi tidak valid.');
     });
+
     socket.on(CLIENT_EVENTS.actionItem, (payload = {}) => {
       if (!requireSession()) return;
       const data = validate(itemSchema, payload);
@@ -261,7 +276,19 @@ export class SocketServer {
       if (!runner.acceptItem(session.playerId)) this.sendError(socket, 'ACTION_REJECTED', 'Tidak ada item yang dapat digunakan.');
     });
 
+    socket.on(CLIENT_EVENTS.actionFlicker, (payload = {}) => {
+      if (!requireSession()) return;
+      const data = validate(flickerSchema, payload);
+      if (!data) return;
+      if (!this.acceptActionId(socket, data.actionId)) return;
+      const room = this.roomManager.findById(session.roomId);
+      const runner = room && this.activeMatches.get(room.id);
+      if (!runner) return this.sendError(socket, 'MATCH_NOT_READY', 'Match belum dimulai.');
+      if (!runner.acceptFlicker(session.playerId, data)) this.sendError(socket, 'ACTION_REJECTED', 'Flicker belum siap digunakan.');
+    });
+
     socket.on('disconnect', (reason) => {
+      this.connections.delete(socket.id);
       const disconnected = this.registry.unbind(socket.id);
       if (!disconnected) return;
       const room = this.roomManager.findById(disconnected.roomId);
@@ -276,12 +303,11 @@ export class SocketServer {
     });
   }
 
-  leaveCurrentRoom(session, socket) {
+  leaveCurrentRoom(session) {
     const room = this.roomManager.findById(session.roomId);
     if (!room) { session.roomId = null; return; }
     this.activeMatches.get(room.id)?.removePlayer(session.playerId);
     room.removePlayer(session.playerId);
-    socket.leave(room.id);
     session.roomId = null;
     this.broadcastRoom(room);
     if (room.players.size === 0) this.stopMatch(room);
@@ -289,7 +315,18 @@ export class SocketServer {
   }
 
   broadcastRoom(room) {
-    this.io.to(room.id).emit(SERVER_EVENTS.roomState, room.toPublicState());
+    this.emitToRoom(room.id, SERVER_EVENTS.roomState, room.toPublicState());
+  }
+
+  emitToSocket(socket, event, payload) {
+    socket?.emit(event, payload);
+  }
+
+  emitToRoom(roomId, event, payload) {
+    for (const session of this.registry.sessionsById.values()) {
+      if (session.roomId !== roomId || !session.socketId) continue;
+      this.connections.get(session.socketId)?.emit(event, payload);
+    }
   }
 
   stopMatch(room) {
@@ -326,4 +363,65 @@ export class SocketServer {
     socket.data.lastActionId = actionId;
     return true;
   }
+
+  createConnection(rawSocket, request) {
+    const handlers = new Map();
+    const connection = {
+      id: randomUUID(),
+      data: {},
+      handshake: { address: request.socket.remoteAddress || 'unknown' },
+      on: (event, handler) => {
+        handlers.set(event, handler);
+        return connection;
+      },
+      emit: (event, payload) => {
+        if (rawSocket.readyState !== WebSocket.OPEN) return;
+        rawSocket.send(JSON.stringify({ type: 'event', event, payload }));
+      },
+      disconnect: (force = false) => rawSocket.close(force ? 1008 : 1000),
+      // Room membership is derived from the authoritative session, not stored
+      // in a separate room adapter.
+      join: () => {},
+      leave: () => {},
+    };
+
+    rawSocket.on('message', (rawMessage) => {
+      let frame;
+      try {
+        frame = JSON.parse(rawMessage.toString());
+      } catch {
+        connection.emit(SERVER_EVENTS.roomError, { code: 'INVALID_PAYLOAD', message: 'Data yang dikirim tidak valid.' });
+        return;
+      }
+      if (!frame || typeof frame.event !== 'string' || frame.event.length > 80) return;
+      const handler = handlers.get(frame.event);
+      if (!handler) return;
+      const ack = typeof frame.requestId === 'string' && frame.requestId.length <= 80
+        ? (payload) => {
+          if (rawSocket.readyState === WebSocket.OPEN) {
+            rawSocket.send(JSON.stringify({ type: 'ack', requestId: frame.requestId, payload }));
+          }
+        }
+        : undefined;
+      try {
+        handler(frame.payload ?? {}, ack);
+      } catch (error) {
+        this.logger.error?.({ err: error, event: frame.event }, 'websocket message handler failed');
+      }
+    });
+    rawSocket.on('close', (code, reason) => {
+      handlers.get('disconnect')?.(reason?.toString() || `closed:${code}`);
+    });
+    rawSocket.on('error', (error) => this.logger.warn?.({ err: error, socketId: connection.id }, 'websocket connection error'));
+    return connection;
+  }
+
+  close() {
+    for (const socket of this.connections.values()) socket.disconnect();
+    this.connections.clear();
+    this.wsServer.close();
+  }
 }
+
+// Keep the old named import working for callers that have not been renamed yet.
+export { WebSocketServer as SocketServer };

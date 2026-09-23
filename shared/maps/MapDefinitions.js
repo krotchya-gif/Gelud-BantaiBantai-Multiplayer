@@ -1,4 +1,5 @@
 import { MapCollision } from './MapCollision.js';
+import { SeededRng } from '../utils/rng.js';
 
 // The browser loads this classic map pack before a player can open a room.
 // The server and test runner load the exact same generator here so its
@@ -106,12 +107,52 @@ export function getMapBlueprint(mapId = 'open', seed = 0) {
 
 export function buildMapSpawnPoints(mapId = 'open', seed = 0, count = 8) {
   const blueprint = getMapBlueprint(mapId, seed);
-  if (!blueprint?.spawns?.length) return buildSpawnPoints(count);
+  if (!blueprint?.cells?.length) return buildSpawnPoints(count);
   const half = blueprint.size / 2;
-  return Array.from({ length: count }, (_, index) => {
-    const [tileX, tileZ] = blueprint.spawns[index % blueprint.spawns.length];
-    return { x: tileX + 0.5 - half, z: tileZ + 0.5 - half };
-  });
+  const cellTypes = getMapPack()?.CELL || {};
+  const candidates = [];
+  const seen = new Set();
+  for (let tileZ = 3; tileZ < blueprint.size - 3; tileZ += 1) {
+    for (let tileX = 3; tileX < blueprint.size - 3; tileX += 1) {
+      const cell = blueprint.cells[tileZ * blueprint.size + tileX];
+      if (!cell || cell.kind === cellTypes.WALL || cell.kind === cellTypes.WATER || cell.kind === cellTypes.HAZARD) continue;
+      const key = `${tileX}:${tileZ}`;
+      seen.add(key);
+      candidates.push({ x: tileX + 0.5 - half, z: tileZ + 0.5 - half });
+    }
+  }
+  if (!candidates.length) return buildSpawnPoints(count);
+  const rng = new SeededRng((seed | 0) ^ mapId.length * 7919);
+  for (let index = candidates.length - 1; index > 0; index -= 1) {
+    const swap = rng.int(0, index);
+    [candidates[index], candidates[swap]] = [candidates[swap], candidates[index]];
+  }
+  const preferred = (blueprint.spawns || [])
+    .map(([tileX, tileZ]) => ({ x: tileX + 0.5 - half, z: tileZ + 0.5 - half }))
+    .filter((point) => seen.has(`${Math.floor(point.x + half)}:${Math.floor(point.z + half)}`));
+  for (let index = preferred.length - 1; index > 0; index -= 1) {
+    const swap = rng.int(0, index);
+    [preferred[index], preferred[swap]] = [preferred[swap], preferred[index]];
+  }
+  const points = [];
+  const first = preferred[0] || candidates[0];
+  points.push(first);
+  const remaining = candidates.filter((candidate) => candidate !== first);
+  while (points.length < Math.max(1, count) && remaining.length) {
+    let bestIndex = 0;
+    let bestDistance = -Infinity;
+    for (let index = 0; index < remaining.length; index += 1) {
+      const candidate = remaining[index];
+      const distance = Math.min(...points.map((point) => Math.hypot(candidate.x - point.x, candidate.z - point.z)));
+      if (distance > bestDistance) {
+        bestDistance = distance;
+        bestIndex = index;
+      }
+    }
+    points.push(remaining.splice(bestIndex, 1)[0]);
+  }
+  while (points.length < Math.max(1, count)) points.push(points[0]);
+  return points;
 }
 
 export function createMapCollision(mapId = 'open', seed = 0) {

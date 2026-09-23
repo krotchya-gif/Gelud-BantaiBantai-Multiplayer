@@ -8,7 +8,7 @@ function numberEnv(name, fallback, { min = -Infinity, max = Infinity } = {}) {
 export function loadServerConfig(env = process.env) {
   return Object.freeze({
     nodeEnv: env.NODE_ENV || 'development',
-    port: numberEnv('PORT', 3000, { min: 1, max: 65535 }),
+    port: numberEnv('PORT', 3200, { min: 1, max: 65535 }),
     gameOrigin: env.GAME_ORIGIN || 'http://localhost:5173',
     tickRate: numberEnv('TICK_RATE', NETWORK_CONFIG.tickRate, { min: 1, max: 120 }),
     snapshotRate: numberEnv('SNAPSHOT_RATE', NETWORK_CONFIG.snapshotRate, { min: 1, max: 60 }),

@@ -28,7 +28,8 @@ export class BotSystem {
       const direction = normalize2(target.x - bot.x, target.z - bot.z);
       const distance = Math.hypot(target.x - bot.x, target.z - bot.z);
       this.simulation.setInput(bot.id, { seq: bot.input.seq + 1, moveX: distance > 4 ? direction.x : -direction.x * 0.2, moveZ: distance > 4 ? direction.z : -direction.z * 0.2, aimX: direction.x, aimZ: direction.z });
-      if (distance <= 12 && bot.attackCooldown <= 0) this.simulation.attackStart(bot.id, direction.x, direction.z);
+      const flickered = distance <= 2.8 && this.simulation.flicker(bot.id, { dirX: -direction.x, dirZ: -direction.z });
+      if (!flickered && distance <= 12 && bot.attackCooldown <= 0) this.simulation.attackStart(bot.id, direction.x, direction.z);
       if (bot.superCharge >= 1 && distance <= 10) this.simulation.super(bot.id, { aimX: direction.x, aimZ: direction.z, targetX: target.x, targetZ: target.z });
     }
   }

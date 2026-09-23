@@ -1,15 +1,33 @@
-// Gameplay-only character data. Visual meshes and animation data stay in public/engine.
+// Shared gameplay and identity data. Visual meshes and animation data stay in
+// public/engine, but network gameplay and UI use this canonical roster.
 export const CHARACTER_DEFS = Object.freeze({
-  dusty: Object.freeze({ id: 'dusty', speed: 3.15, maxHp: 3900, superCharge: 3000, attack: { kind: 'spread', count: 5, damage: 330, speed: 15, range: 7, spread: 0.5, radius: 0.15, color: 0xff9c5a, cooldown: 1.35 }, super: { kind: 'spread', count: 9, damage: 340, speed: 16, range: 8, spread: 0.85, radius: 0.2, color: 0xffdc6a, knockback: 1.2 } }),
-  ace: Object.freeze({ id: 'ace', speed: 3.25, maxHp: 3000, superCharge: 3600, attack: { kind: 'burst', count: 6, damage: 330, speed: 19, range: 9.5, spread: 0.035, radius: 0.13, color: 0x6fd5ff, cooldown: 1.5 }, super: { kind: 'burst', count: 12, damage: 340, speed: 21, range: 11.5, spread: 0.05, radius: 0.2, color: 0xffe0ba, pierce: true } }),
-  fuse: Object.freeze({ id: 'fuse', speed: 3, maxHp: 2900, superCharge: 3000, attack: { kind: 'lob', count: 1, damage: 920, speed: 6.82, range: 7.5, blast: 1.55, flight: 0.72, fuse: 0.38, color: 0xff7f6a, cooldown: 1.55 }, super: { kind: 'lob', count: 1, damage: 2400, speed: 5.16, range: 8.5, blast: 2.8, flight: 0.95, fuse: 0.7, color: 0xffd55a, cooldown: 1.2, knockback: 2 } }),
-  titan: Object.freeze({ id: 'titan', speed: 3.45, maxHp: 6200, superCharge: 3200, attack: { kind: 'melee', count: 4, interval: 0.09, damage: 390, range: 2.7, arc: 1.5, radius: 0.48, color: 0xff5a4a, cooldown: 0.85 }, super: { kind: 'leap', damage: 1000, range: 8, radius: 2.3, flight: 0.75, color: 0xffd55a, knockback: 2.2, cooldown: 1 } }),
-  volt: Object.freeze({ id: 'volt', speed: 3.55, maxHp: 3400, superCharge: 3200, attack: { kind: 'burst', count: 3, interval: 0.075, electric: true, damage: 440, speed: 20, range: 8.4, spread: 0.025, radius: 0.15, color: 0x40ffff, cooldown: 1.25 }, super: { kind: 'burst', count: 8, interval: 0.055, electric: true, damage: 310, speed: 23, range: 10.2, spread: 0.035, radius: 0.19, color: 0x00ffff, pierce: true } }),
-  naka: Object.freeze({ id: 'naka', speed: 3.9, maxHp: 3200, superCharge: 3500, terrainAffinity: { type: 'bush', moveMultiplier: 1.08 }, attack: { kind: 'spread', count: 3, damage: 300, speed: 24, range: 7, spread: 0.24, radius: 0.16, projectile: 'shuriken', color: 0x50f1d2, cooldown: 1.05, returning: true }, super: { kind: 'dash', damage: 900, range: 6, radius: 0.72, flight: 0.22, color: 0x9affdf, cooldown: 0.4 } }),
-  ello: Object.freeze({ id: 'ello', speed: 3.3, maxHp: 5500, superCharge: 3500, terrainAffinity: { type: 'ice', tractionMultiplier: 1.2 }, attack: { kind: 'melee', count: 1, damage: 550, range: 2.9, arc: 1.35, radius: 0.52, color: 0xffcf6a, cooldown: 0.34, combo: [{ damage: 550, recovery: 0.34, lunge: 0.35 }, { damage: 650, recovery: 0.34, lunge: 0.4 }, { damage: 800, recovery: 0.46, lunge: 0.5 }] }, super: { kind: 'iaido', damage: 1100, parryDamage: 1500, range: 5.5, radius: 0.8, guardDuration: 0.45, color: 0xffdc75, cooldown: 0.2 } }),
-  syafiah: Object.freeze({ id: 'syafiah', speed: 3.2, maxHp: 2900, superCharge: 3600, terrainAffinity: { type: 'low-gravity', rangeMultiplier: 1.1 }, attack: { kind: 'burst', count: 1, damage: 650, maxDamage: 1050, speed: 25, maxSpeed: 30, range: 10, maxRange: 12.5, chargeTime: 0.7, radius: 0.12, projectile: 'arrow', color: 0xffc56c, cooldown: 0.45 }, super: { kind: 'arrow-shower', damage: 250, range: 10.5, radius: 3.4, waveCount: 5, waveInterval: 0.35, warningDelay: 0.45 } }),
+  dusty: Object.freeze({ id: 'dusty', name: 'Athallah', speed: 3.15, reload: 1.35, maxHp: 3900, superCharge: 3000, attack: { kind: 'spread', count: 5, pellets: 5, damage: 330, speed: 15, range: 7, spread: 0.5, radius: 0.15, color: 0xffa53a, cooldown: 0.22 }, super: { kind: 'spread', count: 9, pellets: 9, damage: 340, speed: 16, range: 8, spread: 0.85, radius: 0.2, color: 0xffe14a, knockback: 9, breaksWalls: true, cooldown: 0.2 } }),
+  ace: Object.freeze({ id: 'ace', name: 'Zeyd', speed: 3.25, reload: 1.5, maxHp: 3000, superCharge: 3600, attack: { kind: 'burst', count: 6, damage: 200, speed: 19, range: 8.2, spread: 0.035, jitter: 0.035, interval: 0.08, radius: 0.13, color: 0x6fd5ff, cooldown: 0.6, noKnockback: true }, super: { kind: 'burst', count: 12, damage: 220, speed: 21, range: 11.5, spread: 0.05, jitter: 0.05, interval: 0.06, radius: 0.2, color: 0xfff07a, pierce: true, breaksWalls: false, noKnockback: true, cooldown: 0.2 } }),
+  fuse: Object.freeze({ id: 'fuse', name: 'Azka', speed: 3, reload: 1.55, maxHp: 2900, maxAmmo: 5, superCharge: 3000, attack: { kind: 'lob', count: 1, damage: 920, speed: 6.82, range: 7.5, blast: 1.55, flight: 0.72, fuse: 0.38, color: 0xff7a2a, cooldown: 0.3 }, super: { kind: 'lob', count: 1, damage: 2400, speed: 5.16, range: 8.5, blast: 2.8, flight: 0.95, fuse: 0.7, color: 0xffd23a, cooldown: 0.2, knockback: 10, breaksWalls: true, big: true } }),
+  titan: Object.freeze({ id: 'titan', name: 'Einar', speed: 3.25, reload: 1, maxHp: 6200, superCharge: 3200, attack: { kind: 'melee', count: 4, interval: 0.09, damage: 390, range: 2.7, arc: 1.5, radius: 0.48, color: 0xff5a4a, cooldown: 0.48 }, super: { kind: 'leap', damage: 1000, range: 8, radius: 2.3, blast: 2.3, flight: 0.75, color: 0xffd23a, knockback: 11, breaksWalls: true, cooldown: 0.2 } }),
+  volt: Object.freeze({ id: 'volt', name: 'Nopal', speed: 3.55, reload: 1.25, maxHp: 3400, superCharge: 3200, attack: { kind: 'burst', count: 3, interval: 0.075, electric: true, damage: 380, speed: 20, range: 8.4, spread: 0.025, jitter: 0.025, radius: 0.15, color: 0xffd43b, cooldown: 0.345 }, super: { kind: 'burst', count: 8, interval: 0.055, electric: true, damage: 310, speed: 23, range: 10.2, spread: 0.035, jitter: 0.035, radius: 0.19, color: 0xffed98, pierce: true, breaksWalls: true, cooldown: 0.2 } }),
+  naka: Object.freeze({ id: 'naka', name: 'Naka', speed: 3.9, reload: 1.05, maxHp: 3200, superCharge: 3500, terrainAffinity: { type: 'bush', moveMultiplier: 1.08 }, attack: { kind: 'spread', count: 3, pellets: 3, damage: 280, speed: 24, range: 7, spread: 0.24, radius: 0.16, projectile: 'shuriken', color: 0x50f1d2, cooldown: 0.22, returning: true, returnDamageMultiplier: 0.5 }, super: { kind: 'dash', damage: 900, range: 6, radius: 0.72, flight: 0.22, color: 0x9affdf, cooldown: 0.2 } }),
+  ello: Object.freeze({ id: 'ello', name: 'Ello', speed: 3.3, reload: 1, maxHp: 5500, superCharge: 3500, terrainAffinity: { type: 'ice', tractionMultiplier: 1.2 }, attack: { kind: 'melee', count: 1, damage: 550, range: 2.9, arc: 1.35, radius: 0.52, knockback: 1.4, color: 0xffcf6a, cooldown: 0.34, combo: [{ damage: 550, recovery: 0.34, lunge: 0.35 }, { damage: 650, recovery: 0.34, lunge: 0.4 }, { damage: 800, recovery: 0.46, lunge: 0.5 }], comboReset: 0.75, lungeDuration: 0.13 }, super: { kind: 'iaido', damage: 1100, baseDamage: 1100, parryDamage: 1500, range: 5.5, dashRange: 5.5, dashDuration: 0.2, radius: 0.8, slashRadius: 0.8, arc: 2.4, guardDuration: 0.45, color: 0xffdc75, cooldown: 0.2 } }),
+  syafiah: Object.freeze({ id: 'syafiah', name: 'Syafiah', speed: 3.2, reload: 1.35, maxHp: 2900, superCharge: 3600, terrainAffinity: { type: 'low-gravity', rangeMultiplier: 1.1 }, attack: { kind: 'burst', count: 1, damage: 650, maxDamage: 1050, speed: 25, maxSpeed: 30, range: 10, maxRange: 12.5, chargeTime: 0.7, shotRecovery: 0.45, quickDamage: 650, quickRange: 10, quickSpeed: 25, radius: 0.12, projectile: 'arrow', color: 0xffc56c, cooldown: 0.45 }, super: { kind: 'arrow-shower', damage: 250, waveDamage: 250, range: 10.5, radius: 3.4, areaRadius: 3.4, waveCount: 5, waveInterval: 0.35, warningDelay: 0.45, projectileCount: 8, color: 0xfff0aa, cooldown: 0.2 } }),
 });
 
 export function getCharacterDef(characterId) {
   return CHARACTER_DEFS[characterId] || CHARACTER_DEFS.dusty;
 }
+
+export const CHARACTER_IDS = Object.freeze(Object.keys(CHARACTER_DEFS));
+
+export function characterUsesAmmo(characterId) {
+  return characterId !== 'ello' && characterId !== 'syafiah';
+}
+
+export function characterMaxAmmo(characterId) {
+  return getCharacterDef(characterId).maxAmmo || 3;
+}
+
+export const FLICKER = Object.freeze({
+  cooldown: 30,
+  distance: 2.2,
+  duration: 0.18,
+  invulnerability: 0.22,
+});

@@ -12,6 +12,7 @@ export const CLIENT_EVENTS = Object.freeze({
   actionAttackRelease: 'action:attack-release',
   actionSuper: 'action:super',
   actionItem: 'action:item',
+  actionFlicker: 'action:flicker',
   matchLeave: 'match:leave',
   latencyPing: 'latency:ping',
 });

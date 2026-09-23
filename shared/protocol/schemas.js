@@ -71,6 +71,12 @@ export const itemSchema = z.object({
   actionId: z.number().int().nonnegative(),
 }).strict();
 
+export const flickerSchema = z.object({
+  actionId: z.number().int().nonnegative(),
+  dirX: finiteNumber.pipe(z.number().min(-1).max(1)),
+  dirZ: finiteNumber.pipe(z.number().min(-1).max(1)),
+}).strict();
+
 export function parsePayload(schema, payload) {
   const result = schema.safeParse(payload);
   return result.success ? { ok: true, data: result.data } : { ok: false, error: result.error };

@@ -8,6 +8,7 @@ function cd(e) {
 MATCH_MODES.deathmatch = {
   ...MATCH_MODES.classic,
   label: `Deathmatch`,
+  bots: 15,
   targetKills: 50,
   timeLimit: 300,
   powerUpCap: 10,
@@ -39,11 +40,13 @@ var ld = class {
       (this.camera = new hi(Zu, window.innerWidth / window.innerHeight, 1, 260)),
       (this.pipeline = new Zc(document.getElementById(`game`), this.scene, this.camera)),
       (this.pipeline.renderer.info.autoReset = !1),
+      (this.lowEndDevice = n && ((Number(navigator.deviceMemory) || 8) <= 4 || (Number(navigator.hardwareConcurrency) || 8) <= 4)),
       (this.mobileDefaultQuality = n && !qualityChoice),
       (this.mobileDefaultEffects = {
         ao: this.mobileDefaultQuality && typeof t.ao !== `boolean`,
         bloom: this.mobileDefaultQuality && typeof t.bloom !== `boolean`,
       }),
+      this.lowEndDevice && ((this.pipeline.toggles.ao = !1), (this.pipeline.toggles.bloom = !1)),
       typeof t.ao === `boolean`
         ? (this.pipeline.toggles.ao = t.ao)
         : this.mobileDefaultEffects.ao && (this.pipeline.toggles.ao = !1),
@@ -53,6 +56,7 @@ var ld = class {
     let r = requestedQuality || (n ? `low` : `high`);
     ((this.userPickedQuality = qualityChoice),
       (this.pipeline.superSample = $c(parseFloat(this.params.get(`ss`)) || 0, 0, 3)),
+      this.lowEndDevice && (this.pipeline.maxPixelsCoarse = 1000000),
       this.pipeline.setQuality(Uc[r] ? r : n ? `low` : `high`));
     let i = this.params.get(`bots`) || t.difficulty;
     ((this.difficultyName = Hc[i] ? i : `auto`),
@@ -63,7 +67,7 @@ var ld = class {
       document.body.classList.toggle(`left-handed`, this.leftHanded),
       (this.lighting = new kl(this.scene, this.pipeline)),
       this.lighting.applyQuality(this.pipeline.quality),
-      this.mobileDefaultQuality && (this.lighting.key.castShadow = !1),
+      (this.mobileDefaultQuality || this.lowEndDevice) && (this.lighting.key.castShadow = !1),
       this.pipeline.requestShadowUpdate(!0),
       (this.audio = new Xu()),
       (this.audio.muted = !!t.muted),
@@ -167,6 +171,41 @@ var ld = class {
             return;
           }
           this.useHeldItem();
+        });
+      })(),
+      (() => {
+        let button = $(`flicker-action`),
+          touchActivationAt = 0,
+          touchPointerId = null;
+        button.addEventListener(`pointerdown`, (event) => {
+          if (event.pointerType !== `touch`) return;
+          event.preventDefault();
+          event.stopPropagation();
+          touchPointerId = event.pointerId;
+          touchActivationAt = performance.now();
+          this.useFlicker();
+        });
+        window.addEventListener(`pointerup`, (event) => {
+          if (event.pointerId !== touchPointerId) return;
+          touchPointerId = null;
+          touchActivationAt = performance.now();
+        });
+        window.addEventListener(`pointercancel`, (event) => {
+          if (event.pointerId !== touchPointerId) return;
+          touchPointerId = null;
+          touchActivationAt = 0;
+        });
+        button.addEventListener(`click`, (event) => {
+          let generatedByTouch =
+            event.pointerType === `touch` ||
+            (!event.pointerType && touchActivationAt > 0 && event.detail > 0 && performance.now() - touchActivationAt < 800);
+          if (generatedByTouch) {
+            touchActivationAt = 0;
+            event.preventDefault();
+            event.stopPropagation();
+            return;
+          }
+          this.useFlicker();
         });
       })(),
       this.toMenu());
@@ -313,21 +352,52 @@ var ld = class {
   spawnRoster(e) {
     this.clearEntities();
     let t = this.world,
-      n = cd(t.spawns.slice()),
       r = cd(Vc.slice()),
       i = Object.keys(Bc),
       a = Lc.bots + 1;
+    const candidates = [];
+    for (let tileZ = 3; tileZ <= 40; tileZ += 1) {
+      for (let tileX = 3; tileX <= 40; tileX += 1) {
+        if (!t.isWalkable(tileX, tileZ)) continue;
+        const x = t.center(tileX);
+        const z = t.center(tileZ);
+        if (t.isBushAt(x, z) || t.hazardDamageAt(x, z) > 0) continue;
+        candidates.push({ x, z });
+      }
+    }
+    cd(candidates);
+    const spawnPoints = [];
+    while (spawnPoints.length < a && candidates.length) {
+      let bestIndex = 0;
+      let bestDistance = -Infinity;
+      for (let index = 0; index < candidates.length; index += 1) {
+        const candidate = candidates[index];
+        const distance = spawnPoints.length === 0
+          ? 0
+          : Math.min(...spawnPoints.map((point) => Math.hypot(candidate.x - point.x, candidate.z - point.z)));
+        if (distance > bestDistance) {
+          bestDistance = distance;
+          bestIndex = index;
+        }
+      }
+      spawnPoints.push(candidates.splice(bestIndex, 1)[0]);
+    }
+    const spawnPoint = (index) => spawnPoints[index] || t.nearestOpen(0, 0);
     for (let o = 0; o < a; o++) {
-      let [a, s] = n[o % n.length],
+      let point = spawnPoint(o),
         c = o === 0 && !!e,
         l = Bc[c ? e : i[(o + Math.floor(Math.random() * i.length)) % i.length]],
         u = new fu(this, l, {
           isPlayer: c,
           name: c ? `YOU` : r[o % r.length],
-          x: t.center(a),
-          z: t.center(s),
+          x: point.x,
+          z: point.z,
           hueShift: c ? 0 : Q(-0.07, 0.07),
         });
+      const facing = Math.random() * Math.PI * 2;
+      u.facing = facing;
+      u.aimAngle = facing;
+      u.root.rotation.y = facing;
       (this.brawlers.push(u), this.hud.addBrawler(u), c ? (this.player = u) : this.brains.push(new Vu(this, u)));
     }
     for (let [e, n] of t.boxSpots) this.combat.addBox(e, n);
@@ -360,6 +430,31 @@ var ld = class {
     if (this.paused || this.state !== `playing` || !this.player?.useHeldItem()) return !1;
     this.vibrate(12);
     return !0;
+  }
+  useFlicker() {
+    const player = this.player;
+    if (this.networkSession) {
+      if (this.paused || this.state !== `playing` || !player?.alive || player.burst || !player.flickerReady) return !1;
+      const axis = this.input.axis();
+      const aim = this.networkAimDirection(player, axis) || { x: Math.sin(player.facing), z: Math.cos(player.facing) };
+      const length = Math.hypot(axis.x, axis.z);
+      const dx = length > 0.08 ? axis.x / length : aim.x;
+      const dz = length > 0.08 ? axis.z / length : aim.z;
+      let distance = 2.2;
+      const wall = this.world.raycast(player.x, player.z, player.x + dx * distance, player.z + dz * distance);
+      if (wall) distance = Math.max(0, wall.dist - 0.34);
+      if (distance < 0.2) return !1;
+      this.networkSession.sendFlicker(dx, dz);
+      player.flickerReadyAt = this.matchTime + 30;
+      this.startNetworkFlicker(player, { fromX: player.x, fromZ: player.z, toX: player.x + dx * distance, toZ: player.z + dz * distance, dx, dz });
+      this.vibrate([16, 20, 16]);
+      return !0;
+    }
+    if (this.paused || this.state !== `playing` || !player?.alive) return !1;
+    const axis = this.input.axis();
+    const used = player.useFlicker(axis.x, axis.z);
+    used && this.vibrate([16, 20, 16]);
+    return used;
   }
   toMenu() {
     if (this.networkSession) {
@@ -422,10 +517,15 @@ var ld = class {
     this.networkInputT = 0;
     this.networkActionId = 0;
     this.networkFire = false;
+    this.networkFireT = 0;
     this.networkChargeActive = false;
     this.networkAim = null;
     this.networkEntities = new Map();
     this.networkProjectiles = new Map();
+    this.networkProjectilePool = [];
+    this.networkProjectileGeometries = new Map();
+    this.networkProjectileOwnedGeometries = new Set();
+    this.networkProjectileMaterials = new Map();
     this.networkItems = new Map();
     this.networkAreaPulse = new Map();
     if (!session.__gameBound) {
@@ -457,6 +557,7 @@ var ld = class {
         z: player.z || 0,
         hueShift: player.id === session.localPlayerId ? 0 : 0.02,
       });
+      brawler.characterName = player.characterName || def.name;
       brawler.networkId = player.id;
       this.brawlers.push(brawler);
       this.networkEntities.set(player.id, brawler);
@@ -505,6 +606,7 @@ var ld = class {
     if (!entity) return;
     entity.spawnT = Math.max(0, (entity.spawnT || 0) - dt);
     entity.parryT = Math.max(0, (entity.parryT || 0) - dt);
+    entity.flickerInvulnT = Math.max(0, (entity.flickerInvulnT || 0) - dt);
     entity.recoil = nl(entity.recoil || 0, 0, 14, dt);
     entity.punch[0] = nl(entity.punch[0] || 0, 0, 16, dt);
     entity.punch[1] = nl(entity.punch[1] || 0, 0, 16, dt);
@@ -512,7 +614,15 @@ var ld = class {
     if (entity.slashAnim) entity.slashAnim.t += dt;
     if (entity.networkCharging) entity.chargeLevel = Math.min(1, (entity.chargeLevel || 0) + dt / 0.7);
     else entity.chargeLevel = nl(entity.chargeLevel || 0, 0, 18, dt);
-    if (entity.networkDash) {
+    if (entity.networkFlicker) {
+      const flicker = entity.networkFlicker;
+      flicker.t += dt;
+      const amount = $c(flicker.t / 0.18, 0, 1);
+      const eased = amount * amount * (3 - 2 * amount);
+      entity.root.position.set(el(flicker.fromX, flicker.toX, eased), 0, el(flicker.fromZ, flicker.toZ, eased));
+      entity.vel.set(flicker.dx * 12, flicker.dz * 12);
+      if (amount >= 1) { entity.networkFlicker = null; entity.vel.set(0, 0); entity.squash = 1.1; }
+    } else if (entity.networkDash) {
       const dash = entity.networkDash;
       dash.t += dt;
       const amount = $c(dash.t / dash.duration, 0, 1);
@@ -521,12 +631,35 @@ var ld = class {
       entity.vel.set(dash.dx * 5, dash.dz * 5);
       if (amount >= 1) { entity.networkDash = null; entity.squash = 1.1; }
     }
+    entity.isCharging = entity.networkCharging === true;
     entity.animate(dt, moving && entity.alive);
+  }
+  startNetworkFlicker(entity, event) {
+    if (!entity) return;
+    const dx = Number.isFinite(event.dx) ? event.dx : event.toX - event.fromX;
+    const dz = Number.isFinite(event.dz) ? event.dz : event.toZ - event.fromZ;
+    const length = Math.hypot(dx, dz) || 1;
+    entity.networkFlicker = {
+      fromX: event.fromX,
+      fromZ: event.fromZ,
+      toX: event.toX,
+      toZ: event.toZ,
+      dx: dx / length,
+      dz: dz / length,
+      t: 0,
+    };
+    entity.flickerInvulnT = 0.22;
+    entity.facing = Math.atan2(dx, dz);
+    entity.aimAngle = entity.facing;
+    entity.root.rotation.y = entity.facing;
+    entity.squash = -0.35;
+    this.effects.dust(event.fromX, event.fromZ, 6, 1.5);
   }
   updateNetwork(e) {
     this.elapsed += e;
     this.matchTime += e;
     this.networkInputT -= e;
+    this.networkFireT = Math.max(0, (this.networkFireT || 0) - e);
     const player = this.player;
     const axis = this.input.axis();
     const aim = this.networkAimDirection(player, axis);
@@ -542,6 +675,7 @@ var ld = class {
       this.networkSession.sendMovement({ moveX: axis.x, moveZ: axis.z, aimX, aimZ });
     }
     if (player && this.networkSession) {
+      if (this.input.consumeFlicker()) this.useFlicker();
       const aimStick = this.input.sticks.aim;
       if (this.input.touchMode && player.def.id === `syafiah` && aimStick.id !== null && aimStick.mag > 0.22 && !this.networkChargeActive) {
         this.networkChargeActive = true;
@@ -570,14 +704,27 @@ var ld = class {
         }
         if (this.input.fire && !this.networkFire) {
           this.networkFire = true;
-          this.networkSession.sendAttackStart(Math.sin(player.facing), Math.cos(player.facing));
+          this.networkFireT = 0;
+          if (player.def.id === `syafiah`) {
+            this.networkSession.sendAttackStart(Math.sin(player.facing), Math.cos(player.facing));
+            this.networkChargeActive = true;
+            player.networkCharging = true;
+          }
         } else if (!this.input.fire && this.networkFire) {
           this.networkFire = false;
+          this.networkFireT = 0;
           if (player.def.id === `syafiah`) {
             this.networkSession.sendAttackRelease(Math.sin(player.facing), Math.cos(player.facing));
             this.networkChargeActive = false;
             player.networkCharging = false;
           }
+        }
+        if (this.input.fire && player.def.id !== `syafiah` && this.networkFireT <= 0) {
+          this.networkSession.sendAttackStart(Math.sin(player.facing), Math.cos(player.facing));
+          const attack = player.def.attack;
+          this.networkFireT = attack.kind === `burst` || attack.kind === `melee`
+            ? (attack.count || 1) * (attack.interval || 0.12) + 0.12
+            : attack.kind === `lob` ? 0.3 : 0.22;
         }
       }
     }
@@ -586,25 +733,32 @@ var ld = class {
       const distance = Math.hypot(this.player.root.position.x - predicted.x, this.player.root.position.z - predicted.z);
       if (distance > 2.4) this.player.root.position.set(predicted.x, 0, predicted.z);
       else {
-        this.player.root.position.x = nl(this.player.root.position.x, predicted.x, 28, e);
-        this.player.root.position.z = nl(this.player.root.position.z, predicted.z, 28, e);
+        this.player.root.position.x = nl(this.player.root.position.x, predicted.x, 42, e);
+        this.player.root.position.z = nl(this.player.root.position.z, predicted.z, 42, e);
       }
-      this.player.facing = il(this.player.facing, predicted.facing, 28, e);
+      this.player.facing = il(this.player.facing, predicted.facing, 42, e);
       this.player.aimAngle = this.player.facing;
-      this.player.root.rotation.y = this.player.facing;
-      this.player.vel.set(predicted.velX || 0, predicted.velZ || 0);
-      this.updateNetworkPresentation(this.player, e, this.player.vel.lengthSq() > 0.2);
+      this.player.vel.set(predicted?.velX || 0, predicted?.velZ || 0);
+      const localMoving = this.player.vel.lengthSq() > 0.2;
+      const localVisualFacing = localMoving && !this.player.networkCharging && !this.networkFire && (this.player.recoil || 0) < 0.18
+        ? Math.atan2(this.player.vel.x, this.player.vel.y)
+        : this.player.facing;
+      this.player.root.rotation.y = localVisualFacing;
+      this.updateNetworkPresentation(this.player, e, localMoving);
     }
     const snapshot = this.networkSession?.renderState(Date.now());
     if (snapshot) {
+      const seenPlayers = new Set();
       for (const remote of snapshot.players || []) {
+        seenPlayers.add(remote.id);
         const entity = this.networkEntities.get(remote.id);
         if (!entity) continue;
         if (remote.id === this.networkSession.localPlayerId) continue;
-        if (!entity.networkDash) entity.root.position.set(remote.x, 0, remote.z);
+        if (!entity.networkDash && !entity.networkFlicker) entity.root.position.set(remote.x, 0, remote.z);
+        entity.name = remote.name || entity.name;
+        entity.characterName = remote.characterName || entity.characterName || entity.def.name;
         entity.facing = il(entity.facing, remote.facing, 24, e);
         entity.aimAngle = remote.facing;
-        entity.root.rotation.y = entity.facing;
         entity.vel.set(remote.velX || 0, remote.velZ || 0);
         entity.hp = remote.hp;
         entity.maxHp = remote.maxHp;
@@ -616,32 +770,65 @@ var ld = class {
         entity.shieldT = remote.shieldT || 0;
         entity.parryT = remote.parryT || 0;
         entity.slowT = remote.slowT || 0;
-        entity.itemSpeedT = remote.speedBoostT || 0;
+        entity.itemSpeedT = remote.itemSpeedT || 0;
         entity.spawnT = remote.spawnProtectionT || 0;
+        entity.ammo = Number.isFinite(remote.ammo) ? remote.ammo : entity.ammo;
+        entity.reloadT = remote.reloadT || 0;
+        entity.flickerReadyAt = (Number.isFinite(snapshot.match?.elapsed) ? snapshot.match.elapsed : this.matchTime) + (remote.flickerRemaining || 0);
+        entity.flickerInvulnT = remote.flickerInvulnT || 0;
+        entity.fireCooldown = remote.attackCooldown || 0;
+        entity.comboStep = remote.comboStep || 0;
+        entity.burstT = remote.burstT || 0;
         entity.networkCharging = remote.charging === true;
-        entity.root.visible = remote.alive;
-        this.updateNetworkPresentation(entity, e, entity.vel.lengthSq() > 0.2);
+        entity.root.visible = remote.alive && remote.connected !== false;
+        const remoteMoving = entity.vel.lengthSq() > 0.2;
+        const remoteVisualFacing = remoteMoving && !entity.networkCharging && (entity.recoil || 0) < 0.18
+          ? Math.atan2(entity.vel.x, entity.vel.y)
+          : entity.facing;
+        entity.root.rotation.y = remoteVisualFacing;
+        this.updateNetworkPresentation(entity, e, remoteMoving);
+      }
+      for (const [id, entity] of this.networkEntities) {
+        if (id !== this.networkSession.localPlayerId && !seenPlayers.has(id)) entity.root.visible = false;
       }
       const local = snapshot.players?.find((remote) => remote.id === this.networkSession.localPlayerId);
       if (local) {
+        this.matchTime = Number.isFinite(snapshot.match?.elapsed) ? snapshot.match.elapsed : this.matchTime;
         this.focus.set(local.x, 0, local.z);
         if (this.player) {
+          this.player.name = local.name || this.player.name;
+          this.player.characterName = local.characterName || this.player.characterName || this.player.def.name;
           this.player.hp = local.hp;
           this.player.maxHp = local.maxHp;
+          this.player.alive = local.alive;
+          this.player.root.visible = local.alive;
+          this.player.spawnT = local.spawnProtectionT || 0;
           this.player.kills = local.kills || 0;
           this.player.deaths = local.deaths || 0;
           this.player.superCharge = local.superCharge || 0;
           this.player.heldItem = local.heldItem || null;
           this.player.shieldT = local.shieldT || 0;
-          this.player.itemSpeedT = local.speedBoostT || 0;
+          this.player.speedBoostT = local.speedBoostT || 0;
+          this.player.itemSpeedT = local.itemSpeedT || 0;
+          this.player.slowT = local.slowT || 0;
           this.player.parryT = local.parryT || 0;
+          this.player.ammo = Number.isFinite(local.ammo) ? local.ammo : this.player.ammo;
+          this.player.reloadT = local.reloadT || 0;
+          this.player.flickerReadyAt = this.matchTime + (local.flickerRemaining || 0);
+          this.player.flickerInvulnT = local.flickerInvulnT || 0;
+          this.player.fireCooldown = local.attackCooldown || 0;
+          this.player.comboStep = local.comboStep || 0;
+          this.player.burstT = local.burstT || 0;
           this.player.networkCharging = local.charging === true;
+          this.player.isCharging = this.player.networkCharging;
+          if (!local.alive) this.player.root.position.set(local.x, 0, local.z);
           this.focus.set(this.player.root.position.x, 0, this.player.root.position.z);
         }
       }
       this.syncNetworkProjectiles(snapshot.projectiles || []);
       this.syncNetworkItems(snapshot.items || []);
       this.syncNetworkAreas(snapshot.areaEffects || []);
+      if (this.modeName !== `deathmatch`) this.gas.update(e, this.matchTime, false);
     }
     this.updateVisibility();
     this.updateTime(e);
@@ -665,7 +852,8 @@ var ld = class {
   }
   handleNetworkEvent(event) {
     if (!event || !this.networkEntities) return;
-    const entity = event.ownerId ? this.networkEntities.get(event.ownerId) : null;
+    const ownerId = event.ownerId || event.projectile?.ownerId;
+    const entity = ownerId ? this.networkEntities.get(ownerId) : null;
     if (event.type === `DAMAGE`) {
       const target = this.networkEntities.get(event.targetId);
       if (target && target.isPlayer) this.onPlayerHurt(event.amount);
@@ -686,19 +874,29 @@ var ld = class {
     } else if (event.type === `PROJECTILE_SPAWN`) {
       const projectile = event.projectile;
       if (!projectile || !entity) return;
+      this.ensureNetworkProjectile(projectile);
       entity.recoil = 1;
       entity.squash = -0.28;
-      const color = new H(projectile.color || (projectile.electric ? 0x40ffff : 0xffc56c));
+      const color = new J(projectile.color || (projectile.electric ? 0x40ffff : 0xffc56c));
       if (projectile.electric) this.effects.electricMuzzle(entity.x, 0.72, entity.z, projectile.dirX, projectile.dirZ, color, projectile.isSuper ? 1.4 : 1);
       else this.effects.muzzle(entity.x, 0.72, entity.z, projectile.dirX, projectile.dirZ, color, projectile.isSuper ? 1.45 : 1);
     } else if (event.type === `PROJECTILE_DESTROY`) {
-      const color = new H(event.color || (event.electric ? 0x40ffff : 0xffc56c));
+      const color = new J(event.color || (event.electric ? 0x40ffff : 0xffc56c));
       if (event.electric) this.effects.electricImpact(event.x, 0.72, event.z, color, false);
       else this.effects.impact(event.x, 0.72, event.z, color, 5);
     } else if (event.type === `EXPLOSION`) {
-      const color = entity?.superColor || new H(0xffa15b);
+      const color = new J(event.color || (event.super ? entity?.superColor : entity?.lightColor) || 0xffa15b);
       this.effects.explosion(event.x, event.z, event.radius || 1.4, color, event.super === true);
       if (entity?.isPlayer) this.shakeAmp = Math.max(this.shakeAmp, event.super ? 0.36 : 0.2);
+    } else if (event.type === `FLICKER`) {
+      if (entity) {
+        if (entity.networkFlicker && entity.isPlayer) {
+          entity.networkFlicker.toX = event.toX;
+          entity.networkFlicker.toZ = event.toZ;
+        } else {
+          this.startNetworkFlicker(entity, event);
+        }
+      }
     } else if (event.type === `SUPER_DASH`) {
       if (entity) {
         const duration = entity.def.id === `titan` ? entity.def.super.flight || 0.75 : entity.def.super.flight || 0.22;
@@ -720,7 +918,7 @@ var ld = class {
       const x = Number.isFinite(event.targetX) ? event.targetX : event.x ?? entity?.x;
       const z = Number.isFinite(event.targetZ) ? event.targetZ : event.z ?? entity?.z;
       if (Number.isFinite(x) && Number.isFinite(z)) {
-        const color = entity?.superColor || new H(0xd0a2ff);
+        const color = new J(event.color || entity?.superColor || 0xd0a2ff);
         if (event.type === `SUPER_ZONE`) this.effects.ring(x, z, event.radius || 3, color, 0.6, 2.3);
         else if (event.type === `SUPER_WAVE`) this.effects.explosion(x, z, event.radius || 1.4, color, true);
         else this.effects.burst(x, 0.7, z, color, 14, 3);
@@ -740,28 +938,51 @@ var ld = class {
       }
     }
   }
+  ensureNetworkProjectile(projectile) {
+    let mesh = this.networkProjectiles.get(projectile.id);
+    if (mesh) return mesh;
+    const color = projectile.color || (projectile.electric ? 0x40ffff : projectile.isSuper ? 0xffe08a : 0x9affdf);
+    const kind = projectile.kind || (projectile.electric ? `bolt` : `arrow`);
+    let geometry = this.networkProjectileGeometries.get(kind);
+    if (!geometry) {
+      if (kind === `shuriken` || kind === `arrow`) geometry = brawlerProjectileGeometry(kind);
+      else if (kind === `bomb`) geometry = new fr(0.28, 0.28, 0.28);
+      else geometry = new xr(0.075, 0.035, 0.52, 8).rotateX(Math.PI / 2);
+      this.networkProjectileGeometries.set(kind, geometry);
+      if (kind !== `shuriken` && kind !== `arrow`) this.networkProjectileOwnedGeometries.add(geometry);
+    }
+    const materialKey = `${kind}:${color}:${projectile.electric ? 1 : 0}:${projectile.isSuper ? 1 : 0}`;
+    let material = this.networkProjectileMaterials.get(materialKey);
+    if (!material) {
+      material = new Nr({ color, emissive: color, emissiveIntensity: projectile.electric ? 2.7 : 1.35, roughness: 0.26, metalness: kind === `shuriken` ? 0.72 : 0.18 });
+      this.networkProjectileMaterials.set(materialKey, material);
+    }
+    mesh = this.networkProjectilePool.pop() || new Ln(geometry, material);
+    mesh.geometry = geometry;
+    mesh.material = material;
+    mesh.userData.networkProjectile = true;
+    mesh.userData.disposeGeometry = false;
+    mesh.userData.trailAt = -Infinity;
+    mesh.visible = true;
+    mesh.scale.setScalar(1);
+    mesh.rotation.set(0, 0, 0);
+    this.scene.add(mesh);
+    this.networkProjectiles.set(projectile.id, mesh);
+    mesh.position.set(projectile.x, 0.72 + (projectile.height || 0), projectile.z);
+    mesh.rotation.y = Math.atan2(projectile.dirX || 0, projectile.dirZ || 1);
+    return mesh;
+  }
   syncNetworkProjectiles(projectiles) {
     const seen = new Set();
     for (const projectile of projectiles) {
       seen.add(projectile.id);
-      let mesh = this.networkProjectiles.get(projectile.id);
-      if (!mesh) {
-        const color = projectile.color || (projectile.electric ? 0x40ffff : projectile.isSuper ? 0xffe08a : 0x9affdf);
-        const isBomb = projectile.kind === `bomb`;
-        const geometry = isBomb ? new fr(0.28, 0.28, 0.28) : brawlerProjectileGeometry(projectile.kind === `shuriken` ? `shuriken` : `arrow`);
-        const material = new Nr({ color, emissive: color, emissiveIntensity: projectile.electric ? 2.7 : 1.35, roughness: 0.26, metalness: projectile.kind === `shuriken` ? 0.72 : 0.18 });
-        mesh = new Ln(geometry, material);
-        mesh.userData.networkProjectile = true;
-        mesh.userData.disposeGeometry = isBomb;
-        mesh.userData.trailAt = -Infinity;
-        this.scene.add(mesh);
-        this.networkProjectiles.set(projectile.id, mesh);
-      }
+      const mesh = this.ensureNetworkProjectile(projectile);
       mesh.position.set(projectile.x, 0.72 + (projectile.height || 0), projectile.z);
       mesh.rotation.y = Math.atan2(projectile.dirX, projectile.dirZ);
       const scale = projectile.kind === `bomb` ? (projectile.isSuper ? 1.75 : 1.3) : projectile.radius > 0.25 ? 1.45 : 1;
       mesh.scale.setScalar(scale);
-      if (this.elapsed - mesh.userData.trailAt > (projectile.electric ? 0.032 : 0.055)) {
+      const trailsEnabled = this.pipeline.quality.tier > 0 && !this.lowEndDevice;
+      if (trailsEnabled && this.elapsed - mesh.userData.trailAt > (projectile.electric ? 0.032 : 0.055)) {
         mesh.userData.trailAt = this.elapsed;
         if (projectile.electric) this.effects.electricTrail(projectile.x, 0.72 + (projectile.height || 0), projectile.z, mesh.material.color, projectile.isSuper ? 0.28 : 0.18);
         else this.effects.trail(projectile.x, 0.72 + (projectile.height || 0), projectile.z, mesh.material.color, projectile.isSuper ? 0.23 : 0.14);
@@ -770,8 +991,8 @@ var ld = class {
     for (const [id, mesh] of this.networkProjectiles) {
       if (seen.has(id)) continue;
       this.scene.remove(mesh);
-      if (mesh.userData.disposeGeometry) mesh.geometry?.dispose?.();
-      mesh.material?.dispose?.();
+      mesh.visible = false;
+      this.networkProjectilePool.push(mesh);
       this.networkProjectiles.delete(id);
     }
   }
@@ -781,10 +1002,12 @@ var ld = class {
       seen.add(item.id);
       let mesh = this.networkItems.get(item.id);
       if (!mesh) {
-        const colors = { heal: 0x7dff9a, shield: 0x7ceaff, speed: 0xffd15c, ammo: 0xff956d, super: 0xd0a2ff };
-        const width = item.kind === `shield` ? 0.56 : 0.38;
-        mesh = new Ln(new fr(width, item.kind === `heal` ? 0.6 : 0.38, width), new Nr({ color: colors[item.kind] || 0xffc93a, emissive: colors[item.kind] || 0xffc93a, emissiveIntensity: 1.5, roughness: 0.24, metalness: item.kind === `shield` ? 0.45 : 0.08 }));
+        const geometry = this.combat?.itemGeo || new fr(0.4, 0.4, 0.4);
+        const material = this.combat?.itemMaterials?.[item.kind] || new Nr({ color: 0xffc93a, emissive: 0xffc93a, emissiveIntensity: 1.5, roughness: 0.24, metalness: 0.12 });
+        mesh = new Ln(geometry, material);
         mesh.userData.networkItem = true;
+        mesh.userData.ownedGeometry = !this.combat?.itemGeo;
+        mesh.userData.ownedMaterial = !this.combat?.itemMaterials?.[item.kind];
         this.scene.add(mesh);
         this.networkItems.set(item.id, mesh);
       }
@@ -806,7 +1029,7 @@ var ld = class {
       if (this.elapsed - previous < 0.28) continue;
       this.networkAreaPulse.set(area.id, this.elapsed);
       const owner = this.networkEntities.get(area.ownerId);
-      this.effects.ring(area.x, area.z, area.radius || 3, owner?.superColor || new H(0xd0a2ff), 0.38, 2.15);
+      this.effects.ring(area.x, area.z, area.radius || 3, owner?.superColor || new J(0xd0a2ff), 0.38, 2.15);
     }
     for (const id of this.networkAreaPulse.keys()) if (!active.has(id)) this.networkAreaPulse.delete(id);
   }
@@ -815,11 +1038,18 @@ var ld = class {
       if (!collection) continue;
       for (const mesh of collection.values()) {
         this.scene.remove(mesh);
-        if (mesh.userData.disposeGeometry !== false) mesh.geometry?.dispose?.();
-        mesh.material?.dispose?.();
+        if (mesh.userData.ownedGeometry) mesh.geometry?.dispose?.();
+        if (mesh.userData.ownedMaterial) mesh.material?.dispose?.();
       }
       collection.clear();
     }
+    for (const mesh of this.networkProjectilePool || []) this.scene.remove(mesh);
+    for (const geometry of this.networkProjectileOwnedGeometries || []) geometry.dispose?.();
+    for (const material of this.networkProjectileMaterials?.values?.() || []) material.dispose?.();
+    this.networkProjectileOwnedGeometries?.clear?.();
+    this.networkProjectileGeometries?.clear?.();
+    this.networkProjectileMaterials?.clear?.();
+    this.networkProjectilePool = null;
     this.networkProjectiles = null;
     this.networkItems = null;
     this.networkAreaPulse?.clear();
@@ -864,7 +1094,7 @@ var ld = class {
       (e.deadT = 0),
       (e.hp = e.maxHp = e.def.hp),
       (e.cubes = 0),
-      (e.ammo = 3),
+      (e.ammo = e.maxAmmo),
       (e.reloadT = 0),
       (e.superCharge = 0),
       (e.comboStep = 0),
@@ -918,6 +1148,7 @@ var ld = class {
       (i.path = null),
       (i.pathI = 0),
       (i.repathT = 0),
+      (i.spawnHuntT = 12),
       (i.thinkT = 0.2));
   }
   endDeathmatch() {
@@ -1109,6 +1340,7 @@ var ld = class {
       (e.chargeLevel = charging
         ? $c((performance.now() - chargeStartedAt) / (e.def.attack.chargeTime * 1000), 0, 1)
         : 0));
+    if (t.consumeFlicker()) e.useFlicker(n.x, n.z) && this.vibrate([16, 20, 16]);
     for (let n of t.takeShots()) {
       if (n.cancelled) continue;
       let t = n.kind === `super` ? e.def.super : e.def.attack,

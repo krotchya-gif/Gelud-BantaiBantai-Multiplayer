@@ -7,9 +7,9 @@ import { buildSnapshot } from './SnapshotBuilder.js';
 import { BotSystem } from './BotSystem.js';
 
 export class MatchRunner {
-  constructor({ room, io, config, logger = console }) {
+  constructor({ room, transport, config, logger = console }) {
     this.room = room;
-    this.io = io;
+    this.transport = transport;
     this.config = config;
     this.logger = logger;
     this.snapshotEvery = Math.max(1, Math.round(config.tickRate / config.snapshotRate));
@@ -51,7 +51,7 @@ export class MatchRunner {
       matchSeed: this.simulation.state.match.matchSeed,
       players: buildSnapshot(this.simulation).players,
     };
-    this.io.to(this.room.id).emit(SERVER_EVENTS.matchInit, this.initPayload);
+    this.transport.emitToRoom(this.room.id, SERVER_EVENTS.matchInit, this.initPayload);
     this.lastTime = Date.now();
     this.timer = setInterval(() => this.pump(), this.stepMs);
     this.timer.unref?.();
@@ -78,10 +78,14 @@ export class MatchRunner {
     return this.simulation.item(playerId);
   }
 
+  acceptFlicker(playerId, payload) {
+    return this.simulation.flicker(playerId, payload);
+  }
+
   sendCurrentState(socket) {
     if (!this.initPayload) return;
-    socket.emit(SERVER_EVENTS.matchInit, { ...this.initPayload, players: buildSnapshot(this.simulation).players });
-    socket.emit(SERVER_EVENTS.matchSnapshot, buildSnapshot(this.simulation));
+    this.transport.emitToSocket(socket, SERVER_EVENTS.matchInit, { ...this.initPayload, players: buildSnapshot(this.simulation).players });
+    this.transport.emitToSocket(socket, SERVER_EVENTS.matchSnapshot, buildSnapshot(this.simulation));
   }
 
   pump() {
@@ -103,12 +107,15 @@ export class MatchRunner {
     const events = this.simulation.tick(dt);
     for (const event of events) {
       if (event.type === 'MATCH_END') continue;
-      this.io.to(this.room.id).emit(SERVER_EVENTS.matchEvent, event);
+      this.transport.emitToRoom(this.room.id, SERVER_EVENTS.matchEvent, event);
     }
     this.snapshotCounter += 1;
-    if (this.snapshotCounter >= this.snapshotEvery || events.length) {
+    // Gameplay events are sent on their own channel. Do not turn every combat
+    // event into a full world snapshot; at 8 players this otherwise doubles
+    // snapshot traffic exactly when the renderer is already busiest.
+    if (this.snapshotCounter >= this.snapshotEvery) {
       this.snapshotCounter = 0;
-      this.io.to(this.room.id).volatile.emit(SERVER_EVENTS.matchSnapshot, buildSnapshot(this.simulation));
+      this.transport.emitToRoom(this.room.id, SERVER_EVENTS.matchSnapshot, buildSnapshot(this.simulation));
     }
     if (this.simulation.state.match.status === 'ended') this.finish();
   }
@@ -143,11 +150,11 @@ export class MatchRunner {
       scores: [...this.simulation.state.players.values()].map((player) => ({ id: player.id, name: player.name, kills: player.kills, deaths: player.deaths, alive: player.alive })),
       match: { ...match },
     };
-    this.io.to(this.room.id).emit(SERVER_EVENTS.matchEnd, result);
+    this.transport.emitToRoom(this.room.id, SERVER_EVENTS.matchEnd, result);
     this.room.status = 'ended';
     for (const player of this.room.players.values()) player.ready = false;
     this.room.status = 'lobby';
-    this.io.to(this.room.id).emit(SERVER_EVENTS.roomState, this.room.toPublicState());
+    this.transport.emitToRoom(this.room.id, SERVER_EVENTS.roomState, this.room.toPublicState());
     this.stop();
     this.onFinished?.(result);
   }

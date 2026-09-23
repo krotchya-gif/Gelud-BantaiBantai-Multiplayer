@@ -9,9 +9,10 @@ export function beginAttack(state, playerId, aimX, aimZ) {
   if (!player || !player.alive || player.attackCooldown > 0 || player.burstState || player.spawnProtectionT > 0) return false;
   const attack = getCharacterDef(player.characterId).attack;
   if (characterUsesAmmo(player.characterId) && player.ammo < 1) return false;
-  const direction = normalize2(aimX, aimZ);
+  const direction = resolveAim(player, aimX, aimZ);
   player.input.aimX = direction.x;
   player.input.aimZ = direction.z;
+  player.facing = Math.atan2(direction.x, direction.z);
   if (player.characterId === 'syafiah') {
     if (player.chargeStartedAt !== null) return false;
     player.chargeStartedAt = state.match.elapsed;
@@ -38,7 +39,10 @@ export function releaseAttack(state, playerId, aimX, aimZ) {
     charged.range *= attack.terrainAffinity?.rangeMultiplier || getCharacterDef(player.characterId).terrainAffinity?.rangeMultiplier || 1.1;
   }
   if (duration >= attack.chargeTime * 0.9 && duration <= attack.chargeTime * 1.15) charged.damage = Math.round(charged.damage * 1.1);
-  const direction = normalize2(aimX, aimZ);
+  const direction = resolveAim(player, aimX, aimZ);
+  player.input.aimX = direction.x;
+  player.input.aimZ = direction.z;
+  player.facing = Math.atan2(direction.x, direction.z);
   state.events.push({ type: 'ATTACK_RELEASE', ownerId: player.id, ratio });
   return performAttack(state, player, charged, direction);
 }
@@ -47,9 +51,10 @@ export function useSuper(state, playerId, payload = {}) {
   const player = state.players.get(playerId);
   const definition = player && getCharacterDef(player.characterId).super;
   if (!player || !definition || !player.alive || player.burstState || player.superCharge < 1 || player.spawnProtectionT > 0) return false;
-  const direction = normalize2(payload.aimX ?? player.input.aimX, payload.aimZ ?? player.input.aimZ);
+  const direction = resolveAim(player, payload.aimX, payload.aimZ);
   player.input.aimX = direction.x;
   player.input.aimZ = direction.z;
+  player.facing = Math.atan2(direction.x, direction.z);
   const requestedX = Number.isFinite(payload.targetX) ? payload.targetX : player.x + direction.x * definition.range;
   const requestedZ = Number.isFinite(payload.targetZ) ? payload.targetZ : player.z + direction.z * definition.range;
   const requestedDistance = Math.hypot(requestedX - player.x, requestedZ - player.z);
@@ -157,6 +162,14 @@ function performAttack(state, player, attack, direction) {
     spawnProjectile(state, player, attack, Math.sin(angle), Math.cos(angle));
   }
   return true;
+}
+
+function resolveAim(player, aimX, aimZ) {
+  let direction = normalize2(aimX, aimZ);
+  if (Math.hypot(direction.x, direction.z) > 1e-8) return direction;
+  direction = normalize2(player.input.aimX, player.input.aimZ);
+  if (Math.hypot(direction.x, direction.z) > 1e-8) return direction;
+  return normalize2(Math.sin(player.facing || 0), Math.cos(player.facing || 0));
 }
 
 function executeSuper(state, player, attack, direction, targetX, targetZ) {

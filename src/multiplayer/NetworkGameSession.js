@@ -89,18 +89,36 @@ export class NetworkGameSession extends EventTarget {
 
   sendAttackStart(aimX, aimZ) {
     const actionId = ++this.nextActionId;
-    this.network.emit(CLIENT_EVENTS.actionAttackStart, { actionId, aimX, aimZ });
+    const aim = this.resolveAim(aimX, aimZ);
+    this.network.emit(CLIENT_EVENTS.actionAttackStart, { actionId, ...aim });
     return actionId;
   }
 
   sendAttackRelease(aimX, aimZ) {
     const actionId = ++this.nextActionId;
-    this.network.emit(CLIENT_EVENTS.actionAttackRelease, { actionId, aimX, aimZ });
+    const aim = this.resolveAim(aimX, aimZ);
+    this.network.emit(CLIENT_EVENTS.actionAttackRelease, { actionId, ...aim });
     return actionId;
   }
 
   sendSuper(aimX, aimZ, targetX, targetZ) {
-    this.network.emit(CLIENT_EVENTS.actionSuper, { actionId: ++this.nextActionId, aimX, aimZ, targetX, targetZ });
+    const aim = this.resolveAim(aimX, aimZ);
+    this.network.emit(CLIENT_EVENTS.actionSuper, { actionId: ++this.nextActionId, ...aim, targetX, targetZ });
+  }
+
+  resolveAim(aimX, aimZ) {
+    let x = Number.isFinite(aimX) ? aimX : 0;
+    let z = Number.isFinite(aimZ) ? aimZ : 0;
+    if (Math.hypot(x, z) <= 1e-8) {
+      x = this.latestInput.aimX;
+      z = this.latestInput.aimZ;
+    }
+    if (Math.hypot(x, z) <= 1e-8 && this.localPlayer) {
+      x = Math.sin(this.localPlayer.facing || 0);
+      z = Math.cos(this.localPlayer.facing || 0);
+    }
+    const length = Math.hypot(x, z) || 1;
+    return { aimX: x / length, aimZ: z / length };
   }
 
   sendItem() {

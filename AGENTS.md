@@ -31,6 +31,7 @@ Input client
 - Client boleh melakukan prediction, tetapi replay hanya memakai input yang belum di-ack. Jangan mengubah durasi simulasi replay tanpa menyamakan perilaku server.
 - Map client dan server harus memakai `mapId` serta `mapSeed` yang sama. Collision server berasal dari generator map yang sama dengan arena renderer.
 - `player.facing`/aim adalah arah gameplay. Rotasi visual root pemain remote dapat mengikuti velocity saat berjalan; jangan mencampur arah aim dan arah gerak pada perhitungan serangan.
+- Vektor aim `(0, 0)` dari touch tap atau client lama harus menggunakan arah aim/facing terakhir. Fallback ini harus tetap berlaku di client network session dan `shared/simulation/CombatSystem.js` agar projectile, melee, dan charge tidak kehilangan arah.
 - Protocol menggunakan JSON WebSocket native pada `/ws`, protocol version saat ini `1`, dan kapasitas room maksimum 8 pemain. Perubahan payload harus memperbarui schema dan test terkait.
 
 ## Renderer dan asset
@@ -61,7 +62,7 @@ Integration test lobby perlu bind `127.0.0.1`. Jika test gagal dengan `listen EP
 npm test -- --run tests/integration/lobby.test.js
 ```
 
-Pada project ini integration test sebelumnya memang gagal di sandbox, lalu lulus setelah dijalankan dengan izin bind localhost. Dengan bind diizinkan, suite aktual terakhir adalah 33 test lulus. Catat kedua kondisi tersebut saat melaporkan hasil test.
+Pada project ini integration test sebelumnya memang gagal di sandbox, lalu lulus setelah dijalankan dengan izin bind localhost. Dengan bind diizinkan, suite aktual terakhir adalah 38 test lulus. Catat kedua kondisi tersebut saat melaporkan hasil test.
 
 ## Aturan perubahan
 

@@ -685,7 +685,10 @@ var ld = class {
       for (const shot of this.input.takeShots()) {
         if (shot.cancelled) continue;
         const kind = shot.kind === `super` ? `super` : `attack`;
-        const shotAim = this.stickAim(shot, player.def[kind]);
+        // Match the solo input path: a touch tap has no stick displacement, so
+        // use the same nearest-target/facing fallback instead of sending a
+        // zero vector to the authoritative server.
+        const shotAim = shot.tap ? this.autoAim(player.def[kind]) : this.stickAim(shot, player.def[kind]);
         this.networkAim = { x: shotAim.dx, z: shotAim.dz };
         player.facing = Math.atan2(shotAim.dx, shotAim.dz);
         if (kind === `super`) this.networkSession.sendSuper(shotAim.dx, shotAim.dz, shotAim.x, shotAim.z);

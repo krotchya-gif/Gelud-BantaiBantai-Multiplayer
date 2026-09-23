@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { GameSimulation } from '../../shared/simulation/GameSimulation.js';
 import { MapCollision } from '../../shared/maps/MapCollision.js';
 import { buildSnapshot } from '../../server/match/SnapshotBuilder.js';
+import { NetworkGameSession } from '../../src/multiplayer/NetworkGameSession.js';
 
 describe('authoritative super and items', () => {
   it('uses a charged super and emits its authoritative event', () => {
@@ -144,5 +145,50 @@ describe('authoritative super and items', () => {
     expect(events.some((event) => event.type === 'PARRY')).toBe(true);
     expect(attacker.hp).toBe(attacker.maxHp - 1500);
     expect(defender.iaidoState).toBeNull();
+  });
+
+  it('falls back to the last aim when a touch tap sends a zero vector', () => {
+    const emitted = [];
+    const network = {
+      playerId: 'p1',
+      addEventListener() {},
+      emit(event, payload) { emitted.push({ event, payload }); },
+    };
+    const session = new NetworkGameSession(network);
+    session.latestInput = { moveX: 0, moveZ: 0, aimX: 1, aimZ: 0 };
+    session.sendAttackStart(0, 0);
+    session.sendAttackRelease(0, 0);
+    expect(emitted[0].payload).toMatchObject({ aimX: 1, aimZ: 0 });
+    expect(emitted[1].payload).toMatchObject({ aimX: 1, aimZ: 0 });
+  });
+
+  it.each([
+    ['ace', { x: 3, z: 0 }, 'projectile'],
+    ['titan', { x: 2, z: 0 }, 'melee'],
+    ['naka', { x: 3, z: 0 }, 'projectile'],
+    ['syafiah', { x: 3, z: 0 }, 'charged projectile'],
+  ])('uses the previous aim for zero-vector %s attacks', (characterId, targetPosition, kind) => {
+    const simulation = new GameSimulation({
+      players: [
+        { id: 'attacker', name: 'A', characterId, x: 0, z: 0 },
+        { id: 'target', name: 'B', characterId: 'dusty', x: targetPosition.x, z: targetPosition.z },
+      ],
+    });
+    const attacker = simulation.state.players.get('attacker');
+    attacker.input.aimX = 1;
+    attacker.input.aimZ = 0;
+    const target = simulation.state.players.get('target');
+    expect(simulation.attackStart('attacker', 0, 0)).toBe(true);
+    if (characterId === 'syafiah') {
+      for (let index = 0; index < 22; index += 1) simulation.tick(1 / 30);
+      expect(simulation.attackRelease('attacker', 0, 0)).toBe(true);
+    }
+    const events = [];
+    for (let index = 0; index < 36; index += 1) events.push(...simulation.tick(1 / 30));
+    expect(target.hp).toBeLessThan(target.maxHp);
+    if (kind.includes('projectile')) {
+      const spawns = events.filter((event) => event.type === 'PROJECTILE_SPAWN');
+      expect(spawns.some(({ projectile }) => Math.abs(projectile.dirX - 1) < 0.01 && Math.abs(projectile.dirZ) < 0.01)).toBe(true);
+    }
   });
 });

@@ -6,6 +6,14 @@ function Qc(e) {
     return ((e = (e + Math.imul(e ^ (e >>> 7), 61 | e)) ^ e), ((e ^ (e >>> 14)) >>> 0) / 4294967296);
   };
 }
+function disposeRendererResources(resources) {
+  let dispose = () => {
+    for (let resource of new Set(resources)) resource?.dispose?.();
+  };
+  let queue = window.__GBH_RENDERER__?.kind === `webgpu` ? window.__GBH_RENDERER__.renderer?.backend?.device?.queue : null;
+  if (typeof queue?.onSubmittedWorkDone === `function`) queue.onSubmittedWorkDone().then(dispose, dispose);
+  else dispose();
+}
 var ARENA_VARIANTS = {
   open: {
     label: `Open Arena`,
@@ -198,7 +206,7 @@ var ol = (e, t, n, r) => (e - n) * (e - n) + (t - r) * (t - r),
         (this.lastShadowFit = -Infinity),
         (this.shadowFitDirty = !0),
         (this.tier = 1),
-        (this.mapSize = 4096),
+        (this.mapSize = this.pipeline.isWebGPU ? 2048 : 4096),
         (this.shadowFitPoints = Array.from({ length: 6 }, () => new H())));
       let DirectionalLight = this.pipeline.isWebGPU ? window.__GBH_LIGHTS__.DirectionalLight : Si,
         HemisphereLight = this.pipeline.isWebGPU ? window.__GBH_LIGHTS__.HemisphereLight : ri,
@@ -304,19 +312,25 @@ var ol = (e, t, n, r) => (e - n) * (e - n) + (t - r) * (t - r),
       (t.map.dispose(), (t.map = null));
     }
     applyQuality(e) {
+      // WebGPU can still have the previous shadow map referenced by an
+      // in-flight command buffer when a quality change resizes it. Keep its
+      // shadow targets stable for the renderer lifetime; quality still changes
+      // shadow casting, pixel ratio, and light count without replacing textures.
+      let shadowMapSize = this.pipeline.isWebGPU ? 2048 : e.shadowMap;
+      let lampMapSize = this.pipeline.isWebGPU ? 1024 : e.lampMap;
       ((this.tier = e.tier),
         (this.shadowFitDirty = !0),
         (this.pcss = this.pipeline.usingPCSS),
-        this.mapSize !== e.shadowMap &&
-          ((this.mapSize = e.shadowMap),
-          this.key.shadow.mapSize.set(e.shadowMap, e.shadowMap),
+        this.mapSize !== shadowMapSize &&
+          ((this.mapSize = shadowMapSize),
+          this.key.shadow.mapSize.set(shadowMapSize, shadowMapSize),
           this.invalidateShadowMap(this.key)),
         this.setPoolSize(e.poolLights),
         this.lampSlots.forEach((t, n) => {
           let r = e.lampShadows && n < this.lampShadowSlots;
           (t.castShadow !== r && (t.castShadow = r),
-            t.shadow.mapSize.x !== e.lampMap &&
-              (t.shadow.mapSize.set(e.lampMap, e.lampMap),
+            t.shadow.mapSize.x !== lampMapSize &&
+              (t.shadow.mapSize.set(lampMapSize, lampMapSize),
               this.invalidateShadowMap(t)));
         }),
         this.updateShadowParams());
@@ -1925,8 +1939,7 @@ varying vec3 vBladeWorld;`,
     }
     dispose() {
       this.scene.remove(this.group);
-      for (let e of this.disposables) e.dispose && e.dispose();
-      for (let e of Object.values(this.meshes)) e.dispose && e.dispose();
+      disposeRendererResources([...this.disposables, ...Object.values(this.meshes)]);
     }
   },
   Ql = {},

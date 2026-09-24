@@ -273,7 +273,7 @@ export class WebSocketServer {
       const room = this.roomManager.findById(session.roomId);
       const runner = room && this.activeMatches.get(room.id);
       if (!runner) return this.sendError(socket, 'MATCH_NOT_READY', 'Match belum dimulai.');
-      if (!runner.acceptItem(session.playerId)) this.sendError(socket, 'ACTION_REJECTED', 'Tidak ada item yang dapat digunakan.');
+      if (!runner.acceptItem(session.playerId, data.slot)) this.sendError(socket, 'ACTION_REJECTED', 'Tidak ada item yang dapat digunakan.');
     });
 
     socket.on(CLIENT_EVENTS.actionFlicker, (payload = {}) => {

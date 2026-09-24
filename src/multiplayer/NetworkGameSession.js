@@ -121,8 +121,8 @@ export class NetworkGameSession extends EventTarget {
     return { aimX: x / length, aimZ: z / length };
   }
 
-  sendItem() {
-    this.network.emit(CLIENT_EVENTS.actionItem, { actionId: ++this.nextActionId });
+  sendItem(slot = 0) {
+    this.network.emit(CLIENT_EVENTS.actionItem, { actionId: ++this.nextActionId, slot: slot === 1 ? 1 : 0 });
   }
 
   sendFlicker(dirX, dirZ) {

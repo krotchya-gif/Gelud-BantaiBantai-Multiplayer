@@ -9,6 +9,7 @@ export class GameSimulation {
   constructor(options = {}) {
     this.state = createSimulationState(options);
     this.rng = new SeededRng(this.state.match.matchSeed);
+    this.trapRng = new SeededRng((this.state.match.mapSeed ^ Math.imul(this.state.match.matchSeed, 31) ^ 0x52ed270b) | 0);
     this.collision = options.collision || new MapCollision();
     this.state.collision = this.collision;
     this.events = [];
@@ -74,8 +75,8 @@ export class GameSimulation {
     return useSuper(this.state, playerId, payload);
   }
 
-  item(playerId) {
-    return useItem(this.state, playerId);
+  item(playerId, slot = 0) {
+    return useItem(this.state, playerId, slot);
   }
 
   flicker(playerId, payload) {
@@ -117,6 +118,7 @@ export class GameSimulation {
     stepAreaEffects(this.state, dt);
     stepItems(this.state, dt);
     this.applyHazards(dt);
+    this.stepTimedTraps(dt);
     this.respawnPlayers();
     this.checkMatchEnd();
     this.events.push(...this.state.events);
@@ -152,6 +154,60 @@ export class GameSimulation {
     }
   }
 
+  stepTimedTraps(dt) {
+    const { match, traps } = this.state;
+    if (match.elapsed >= match.nextTrapAt && traps.size === 0) {
+      const kind = this.trapRng.pick(['explosion', 'burning', 'poison']);
+      let point = null;
+      for (let attempt = 0; attempt < 72; attempt += 1) {
+        const x = -15 + this.trapRng.next() * 30;
+        const z = -15 + this.trapRng.next() * 30;
+        if (this.collision?.isSolidPoint?.(x, z, 0.55)) continue;
+        if (this.collision?.hazardAt?.(x, z)) continue;
+        point = { x, z };
+        break;
+      }
+      point ||= { x: 0, z: 0 };
+      const id = `trap_${this.state.nextTrapId++}`;
+      traps.set(id, { id, kind, ...point, radius: 3.6, phase: 'warning', remaining: 5, damageT: 0, createdAt: match.elapsed });
+      match.nextTrapAt += 60;
+      this.state.events.push({ type: 'TRAP_WARNING', id, kind, x: point.x, z: point.z, radius: 3.6, remaining: 5 });
+    }
+
+    for (const [id, trap] of traps) {
+      if (trap.createdAt !== match.elapsed) trap.remaining = Math.max(0, trap.remaining - dt);
+      if (trap.phase === 'warning' && trap.remaining <= 0) {
+        if (trap.kind === 'explosion') {
+          for (const player of this.state.players.values()) {
+            if (!player.alive) continue;
+            const distance = Math.hypot(player.x - trap.x, player.z - trap.z);
+            if (distance <= trap.radius) applyDamage(this.state, player, Math.round(1450 * (1 - distance / trap.radius * 0.45)), null);
+          }
+          this.state.events.push({ type: 'TRAP_EXPLOSION', id, kind: trap.kind, x: trap.x, z: trap.z, radius: trap.radius });
+          traps.delete(id);
+          continue;
+        }
+        trap.phase = 'active';
+        trap.remaining = 8;
+        trap.damageT = 0;
+        this.state.events.push({ type: 'TRAP_ACTIVE', id, kind: trap.kind, x: trap.x, z: trap.z, radius: trap.radius, remaining: 8 });
+      }
+      if (trap.phase !== 'active') continue;
+      trap.damageT += dt;
+      while (trap.damageT >= 1) {
+        trap.damageT -= 1;
+        const damage = trap.kind === 'burning' ? 240 : 190;
+        for (const player of this.state.players.values()) {
+          if (player.alive && Math.hypot(player.x - trap.x, player.z - trap.z) <= trap.radius) applyDamage(this.state, player, damage, null);
+        }
+      }
+      if (trap.remaining <= 0) {
+        this.state.events.push({ type: 'TRAP_END', id, kind: trap.kind });
+        traps.delete(id);
+      }
+    }
+  }
+
   respawnPlayers() {
     if (!this.state.match.respawn) return;
     for (const player of this.state.players.values()) {
@@ -159,7 +215,7 @@ export class GameSimulation {
       const point = this.state.spawnPoints[this.state.nextSpawnIndex % this.state.spawnPoints.length];
       this.state.nextSpawnIndex += 1;
       player.x = point.x; player.z = point.z; player.hp = player.maxHp; player.alive = true;
-      player.spawnProtectionT = this.state.match.spawnProtection; player.deadT = 0; player.heldItem = null; player.shieldT = 0; player.speedBoostT = 0; player.itemSpeedT = 0; player.slowT = 0;
+      player.spawnProtectionT = this.state.match.spawnProtection; player.deadT = 0; player.heldItems = [null, null]; player.heldItem = null; player.shieldT = 0; player.speedBoostT = 0; player.itemSpeedT = 0; player.slowT = 0;
       player.superCharge = 0; player.ammo = characterMaxAmmo(player.characterId); player.reloadT = 0; player.attackCooldown = 0; player.burstT = 0; player.burstState = null; player.comboStep = 0; player.comboResetT = 0; player.iaidoState = null; player.iaidoEmpowered = false; player.flickerInvulnT = 0; player.flickerState = null;
       player.velX = 0; player.velZ = 0; player.input.moveX = 0; player.input.moveZ = 0; player.lastCombat = this.state.match.elapsed;
       player.chargeStartedAt = null;

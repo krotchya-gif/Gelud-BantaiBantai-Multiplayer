@@ -377,6 +377,7 @@ var FLICKER_COOLDOWN = 30,
         (this.itemSpeedT = 0),
         (this.shieldT = 0),
         (this.heldItem = null),
+        (this.heldItems = [null, null]),
         (this.stationaryT = 0),
         (this.attackSerial = 0),
         (this.lastVoltTarget = null),
@@ -456,7 +457,7 @@ var FLICKER_COOLDOWN = 30,
       return this.alive && !this.leap && !this.dash && !this.flicker && this.game.state !== `countdown`;
     }
     useFlicker(e, t) {
-      if (!this.canAct() || this.burst || this.game.state !== `playing` || !this.flickerReady) return !1;
+      if (!this.canAct() || this.spawnT > 0 || this.burst || this.game.state !== `playing` || !this.flickerReady) return !1;
       let n = Math.hypot(e || 0, t || 0);
       n < 0.08 && ((e = Math.sin(this.facing)), (t = Math.cos(this.facing)), (n = 1));
       (e /= n), (t /= n);
@@ -760,9 +761,14 @@ var FLICKER_COOLDOWN = 30,
         (!this.hidden || this.isPlayer) &&
         (this.game.hud.floatText(this.x, 1.7, this.z, `+${n}`, `heal`), this.game.effects.healPuff(this.x, this.z));
     }
-    canUseHeldItem() {
-      if (!this.alive || !this.heldItem) return !1;
-      switch (this.heldItem) {
+    getHeldItem(slot = 0) {
+      this.heldItems ||= [this.heldItem || null, null];
+      return this.heldItems[slot === 1 ? 1 : 0] || (slot === 0 ? this.heldItem : null);
+    }
+    canUseHeldItem(slot = 0) {
+      let item = this.getHeldItem(slot);
+      if (!this.alive || !item) return !1;
+      switch (item) {
         case `shield`:
           return this.shieldT <= 0;
         case `speed`:
@@ -777,11 +783,13 @@ var FLICKER_COOLDOWN = 30,
           return !1;
       }
     }
-    useHeldItem() {
-      if (!this.canUseHeldItem()) return !1;
-      let item = this.heldItem,
+    useHeldItem(slot = 0) {
+      slot = slot === 1 ? 1 : 0;
+      if (!this.canUseHeldItem(slot)) return !1;
+      let item = this.getHeldItem(slot),
         names = { shield: `Shield`, speed: `Speed boost`, heal: `Medkit`, ammo: this.usesAmmo ? `Ammo refill` : `Focus`, super: `Super charger` };
-      this.heldItem = null;
+      this.heldItems[slot] = null;
+      this.heldItem = this.heldItems[0] || null;
       switch (item) {
         case `shield`:
           this.shieldT = 3;
@@ -807,18 +815,22 @@ var FLICKER_COOLDOWN = 30,
       return !0;
     }
     updateBotItem() {
-      if (this.isPlayer || !this.heldItem || !this.canUseHeldItem()) return;
+      if (this.isPlayer) return;
       let nearest = 1 / 0;
       for (let other of this.game.brawlers)
         other !== this && other.alive && (nearest = Math.min(nearest, Math.hypot(other.x - this.x, other.z - this.z)));
-      let health = this.hp / this.maxHp,
-        use =
-          (this.heldItem === `heal` && health <= 0.58) ||
-          (this.heldItem === `shield` && health <= 0.72 && nearest <= 4) ||
-          (this.heldItem === `speed` && nearest > 3.5 && nearest < 12) ||
-          (this.heldItem === `ammo` && (this.usesAmmo ? this.ammo <= Math.max(1, this.maxAmmo * 0.4) : this.superCharge <= 0.9)) ||
-          (this.heldItem === `super` && !this.superReady && this.superCharge <= 0.75 && nearest < 8);
-      use && this.useHeldItem();
+      let health = this.hp / this.maxHp;
+      for (let slot = 0; slot < 2; slot += 1) {
+        let item = this.getHeldItem(slot);
+        if (!item || !this.canUseHeldItem(slot)) continue;
+        let use =
+          (item === `heal` && health <= 0.58) ||
+          (item === `shield` && health <= 0.72 && nearest <= 4) ||
+          (item === `speed` && nearest > 3.5 && nearest < 12) ||
+          (item === `ammo` && (this.usesAmmo ? this.ammo <= Math.max(1, this.maxAmmo * 0.4) : this.superCharge <= 0.9)) ||
+          (item === `super` && !this.superReady && this.superCharge <= 0.75 && nearest < 8);
+        if (use && this.useHeldItem(slot)) break;
+      }
     }
     addCube() {
       if (this.game.modeName === `deathmatch` && this.cubes >= this.game.mode.powerUpCap) return !1;
@@ -843,6 +855,7 @@ var FLICKER_COOLDOWN = 30,
          (this.itemSpeedT = 0),
          (this.shieldT = 0),
          (this.heldItem = null),
+         (this.heldItems = [null, null]),
          (this.isCharging = !1),
          (this.chargeLevel = 0),
          (this.iaidoState = null),
@@ -1190,8 +1203,12 @@ var FLICKER_COOLDOWN = 30,
     }
     dispose() {
       this.game.scene.remove(this.root);
-      for (let e of this.model.allMats) e.dispose();
-      (this.ring.material.dispose(), this.superRing.material.dispose(), this.disc && this.disc.material.dispose());
+      disposeRendererResources([
+        ...this.model.allMats,
+        this.ring.material,
+        this.superRing.material,
+        this.disc?.material,
+      ]);
     }
   },
   pu = new Re(),

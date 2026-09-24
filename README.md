@@ -94,7 +94,7 @@ Implementasi yang sudah tersedia:
 - Input touch multiplayer memakai fallback auto-aim yang sama dengan solo saat pemain melakukan tap tanpa perpindahan joystick. Client dan server juga mengganti vektor aim kosong dengan arah aim/facing terakhir, sehingga projectile, melee, shuriken, dan arrow tidak berhenti atau selalu mengarah ke default.
 - Snapshot penuh tetap 15 Hz walaupun event combat ramai. Event projectile, damage, dan efek dikirim melalui frame gameplay terpisah agar traffic tidak melonjak menjadi satu snapshot setiap tick.
 - Perangkat coarse/low-end (misalnya perangkat dengan memory sekitar 4 GB) otomatis memakai batas pixel lebih rendah, tanpa AO/bloom dan tanpa projectile trail jaringan untuk mengurangi stutter.
-- PWA single-player, WebGPU, fallback WebGL2, desktop controls, mobile multi-touch, dan mode left-handed tetap dipertahankan.
+- PWA single-player, WebGL2 sebagai renderer default, WebGPU eksperimental opt-in, desktop controls, mobile multi-touch, dan mode left-handed tetap dipertahankan.
 
 Fitur yang memang belum termasuk scope saat ini adalah akun/database, progression dan leaderboard global, ranked matchmaking, friend/party system, chat/voice, spectator/replay, Redis atau multi-server orchestration, delta/binary snapshot protocol, Kubernetes/microservices, dan anti-cheat native. Room dan state match masih berada di memory satu process Node.js.
 
@@ -115,19 +115,21 @@ npm test -- --run tests/server tests/shared
 npm test -- --run
 ```
 
-Build production dan test karakter berhasil. Suite server/shared berisi 34 test dan lulus. Build menghasilkan 11 script engine, empat icon PNG, manifest, service worker, serta bundle WebGPU; seluruh file tersebut masuk precache service worker. Ukuran build yang terukur adalah `dist/` 2,9 MB, bundle WebGPU 781,37 kB (212,55 kB gzip), dan bundle aplikasi 30,98 kB (10,93 kB gzip). Pengukuran sintetis delapan pemain menunjukkan snapshot tetap 15 Hz, trafik sekitar 62,5 KB/detik/client saat diam dan 169,2 KB/detik/client saat semua pemain menembak, dengan p95 simulasi plus satu serialisasi snapshot sekitar 0,29 ms. Suite penuh berisi 38 test dan seluruhnya lulus ketika bind localhost diizinkan (`38 passed`); pada sandbox terbatas, empat integration test lobby gagal sebelum assertion dengan `listen EPERM` karena bind `127.0.0.1` diblokir.
+Verifikasi update kontrol, trap, dan grafis: `npm run build`, `npm run test:characters`, `npm test -- --run` (22 file, 82 test), pemeriksaan sintaks 21 file JavaScript/MJS yang berubah, dan `git diff --check` lulus. Test karakter juga memeriksa roster Deathmatch maksimal dua bot per karakter pada 65 seed, perilaku solo untuk item/cooldown Flicker/trap berkala, penurunan kualitas otomatis saat Ultra manual berjalan 5 FPS, pencegahan trap lokal palsu di multiplayer, animasi dan efek super multiplayer, serta penggunaan ulang dan pembersihan aset visual jaringan. Hasil build terbaru berukuran 3,01 MB untuk `dist/` (3.012.412 byte), dengan bundle WebGPU 781,37 kB (212,55 kB gzip) dan bundle aplikasi 31,00 kB (10,94 kB gzip). Freeze yang terjadi sesekali pada GPU dan map tertentu masih perlu diuji di perangkat yang mengalami masalah; test otomatis tidak dapat membuktikan masalah tersebut hilang sepenuhnya.
+
+Benchmark sintetis delapan pemain yang tercatat sebelumnya adalah baseline sebelum snapshot trap berkala: snapshot 15 Hz, trafik sekitar 62,5 KB/detik/client saat diam dan 169,2 KB/detik/client saat semua pemain menembak, dengan p95 simulasi plus satu serialisasi snapshot sekitar 0,29 ms. Trafik multiplayer setelah penambahan snapshot trap belum diukur ulang.
 
 Pekerjaan operasional yang masih memerlukan lingkungan deployment adalah mengisi hostname/token Cloudflare, deploy ke VPS, smoke test dua perangkat, dan soak/load test multiplayer. Dokumentasi deployment di atas sudah mengikuti konfigurasi aktual project.
 
 ## Renderer
 
-`src/bootstrap.js` mencoba WebGPU jika tersedia, kemudian memuat engine gameplay klasik secara berurutan. Jika WebGPU tidak tersedia atau gagal diinisialisasi, game memakai WebGL2. Untuk memaksa fallback WebGL2:
+`src/bootstrap.js` memakai WebGL2 sebagai renderer default, kemudian memuat engine gameplay klasik secara berurutan. WebGPU tetap tersedia sebagai jalur eksperimental melalui `?renderer=webgpu`. Pada sesi verifikasi lokal, WebGPU berulang kali melaporkan `ShadowDepthTexture` yang sudah dihancurkan saat frame dikirim, jadi jalur itu tidak dipilih otomatis. WebGL2 berjalan tanpa error renderer pada sesi tersebut.
 
 ```text
-http://localhost:5173/?renderer=webgl
+http://localhost:5173/?renderer=webgpu
 ```
 
-Jalur WebGPU dan WebGL2 memakai pipeline kualitas yang sama secara umum, tetapi beberapa efek post-processing dan shader lama memiliki padanan lebih sederhana di WebGPU.
+Jalur WebGPU dan WebGL2 memakai pipeline kualitas yang sama secara umum, tetapi beberapa efek post-processing dan shader lama memiliki padanan lebih sederhana di WebGPU. Pada High/Ultra, ukuran shadow map dibatasi; GTAO WebGL2 dijalankan pada separuh resolusi buffer untuk mengurangi biaya render. Pergantian High/Ultra mempertahankan pass post-processing yang masih cocok dan memperbarui resolusi/shadow tanpa membangun ulang pipeline. Jika FPS tetap sangat rendah selama beberapa detik, game menurunkan kualitas satu tingkat dan memberi tahu pemain, termasuk saat kualitas semula dipilih manual. Freeze yang hanya muncul sesekali pada GPU atau map tertentu tetap perlu diuji di perangkat yang mengalaminya.
 
 ## Struktur proyek
 
@@ -187,7 +189,7 @@ File engine dimuat sebagai script klasik berurutan karena beberapa kelas Three.j
 
 Athallah tetap menjadi baseline pass ini. Item `ammo` berubah menjadi **Focus** yang mengisi 20% Super untuk Ello dan Syafiah; karakter lain tetap menerima ammo refill.
 
-Semua karakter memiliki skill **Flicker** untuk menghindar. Cooldown awal 30 detik sehingga tidak langsung siap saat spawn, lalu kembali 30 detik setiap kali digunakan. Cooldown memakai waktu absolut: tidak di-reset saat mati/respawn, berhenti pada satu charge saat sudah penuh, dan tidak dapat stack. Flicker bergerak maksimal 2,2 unit selama 0,18 detik dan memberi invulnerability window 0,22 detik, dengan collision authoritative. Desktop memakai `Shift`; mobile memakai tombol kecil di kiri `SUPER`.
+Semua karakter memiliki skill **Flicker** untuk menghindar. Cooldown awal 30 detik sehingga tidak langsung siap saat spawn, lalu kembali 30 detik setiap kali digunakan. Cooldown memakai waktu absolut: tidak di-reset saat mati/respawn, berhenti pada satu charge saat sudah penuh, dan tidak dapat stack. Flicker bergerak maksimal 2,2 unit selama 0,18 detik dan memberi invulnerability window 0,22 detik, dengan collision authoritative. Desktop tetap memakai `Shift` dan menampilkan hitung mundur/siap pakai; mobile menampilkan state yang sama pada tombol Flicker. Jika charge penuh tetapi spawn protection atau aksi lain mengunci penggunaan, tombol menampilkan `WAIT`.
 
 ## Mode dan arena
 
@@ -208,7 +210,11 @@ Menu menyediakan Classic, Blitz, dan Deathmatch. Arena default lama adalah `open
 
 Nama yang dipakai URL adalah slug lowercase, misalnya `green-crossroads`, `frozen-lake`, atau `gravity-rifts`. `map-biomes.js` mengubah recipe menjadi grid, cover, spawn, landmark, dan surface hazard yang dipakai `world.js`.
 
-Deathmatch solo berakhir pada 50 kill atau 5 menit dan dimulai dengan 15 bot. Bot langsung mengunci lawan setelah spawn, memakai pathfinding saat target terhalang cover biasa, tetap menghormati concealment semak, dan kembali agresif setelah respawn. Mode ini memiliki power-up cap level 10, respawn 5 detik, dan spawn protection 2 detik. Efek permukaan juga berinteraksi dengan brawler, misalnya bonus gerak Naka di semak, traksi Ello di es, dan jangkauan Syafiah di gravitasi rendah.
+Deathmatch solo berakhir pada 50 kill atau 5 menit dan dimulai dengan 15 bot. Bot langsung mengunci lawan setelah spawn, memakai pathfinding saat target terhalang cover biasa, tetap menghormati concealment semak, dan kembali agresif setelah respawn. Pemilihan karakter bot membatasi setiap karakter maksimal dua bot per match agar roster tetap beragam. Mode ini memiliki power-up cap level 10, respawn 5 detik, dan spawn protection 2 detik. Efek permukaan juga berinteraksi dengan brawler, misalnya bonus gerak Naka di semak, traksi Ello di es, dan jangkauan Syafiah di gravitasi rendah.
+
+### Trap acak berkala
+
+Setiap 60 detik simulasi memilih lokasi aman yang walkable secara seeded untuk sebuah trap acak. Area memberi peringatan selama 5 detik sebelum aktif. Trap dapat meledak sekali atau meninggalkan area burning/gas beracun selama 8 detik. Damage, waktu aktif, dan pemilihan target berasal dari simulasi yang sama di solo dan multiplayer; client hanya menggambar penanda peringatan dan efek yang diterima dari simulasi. Trap berkala berlaku di seluruh mode; efek permukaan arena dan gas batas pada Classic/Blitz tetap menjadi sistem terpisah.
 
 ## Kontrol
 
@@ -219,14 +225,15 @@ W A S D       bergerak
 Mouse         mengarahkan
 Click         basic attack
 Space / RMB   tahan untuk membidik Super, lepaskan untuk menembak
-F             memakai item
+F             memakai Item 1
+G             memakai Item 2
 Shift         Flicker untuk menghindar
 T             mengganti waktu hari
 P / Escape    pause atau lanjut
 M             mute
 ```
 
-Mobile memakai joystick kiri dan joystick aim kanan. Tombol **FLICKER** berada di kiri tombol **SUPER**, sedangkan tombol **ITEM** berada di atas tombol **SUPER**, di luar area aim/basic attack. Event touch item dan Flicker diproses terpisah sehingga menekan tombol dengan jari kedua tidak mereset gerakan, bidikan, atau joystick yang sedang aktif. Mode left-handed memindahkan cluster aksi ke sisi kiri.
+Mobile memakai joystick gerak kiri dan joystick aim kanan. Cluster gameplay kanan bawah mengikuti pola referensi: tombol serangan utama dengan tiga posisi skill melengkung di sekitarnya; **SUPER** berada di posisi paling bawah dari tiga posisi skill. Baris utility di bawahnya berurutan **Item 1**, **Item 2**, **Flicker**, menggantikan tombol Recall/Regen/Execute pada referensi. Slot item menampilkan item yang dipegang masing-masing; cooldown Flicker menampilkan detik tersisa lalu state siap. Layout yang sama menjadi default untuk skill atau item tambahan. Hanya cluster kontrol gameplay bawah yang mengikuti pola ini; HUD lainnya tetap terpisah. Event touch item dan Flicker diproses terpisah sehingga menekan tombol dengan jari kedua tidak mereset gerakan, bidikan, atau joystick yang sedang aktif. Mode left-handed memindahkan cluster aksi ke sisi lain.
 
 ## Parameter debug URL
 

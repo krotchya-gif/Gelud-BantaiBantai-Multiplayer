@@ -1,5 +1,28 @@
 // Gameplay-owned roster extensions and balance metadata. Kept outside the
 // bundled Three.js file so character updates never modify the vendor runtime.
+function createBalancedBotRoster(characterIds, count, seed = 0) {
+  const ids = [...new Set(characterIds)].filter(Boolean);
+  const limit = 2;
+  if (count > ids.length * limit) throw new RangeError('Bot count exceeds the two-per-character roster limit.');
+  let state = ((seed | 0) ^ 0x51ed270b) >>> 0;
+  const nextRandom = () => {
+    let value = (state += 0x6d2b79f5);
+    value = Math.imul(value ^ (value >>> 15), value | 1);
+    value ^= value + Math.imul(value ^ (value >>> 7), value | 61);
+    return ((value ^ (value >>> 14)) >>> 0) / 4294967296;
+  };
+  const counts = new Map();
+  const roster = [];
+  while (roster.length < count) {
+    const available = ids.filter((id) => (counts.get(id) || 0) < limit);
+    const characterId = available[Math.floor(nextRandom() * available.length)];
+    if (!characterId) throw new RangeError('Cannot create a bot roster without available characters.');
+    roster.push(characterId);
+    counts.set(characterId, (counts.get(characterId) || 0) + 1);
+  }
+  return roster;
+}
+
 (() => {
   const ratings = {
     dusty: [4, 3, 4, 2],

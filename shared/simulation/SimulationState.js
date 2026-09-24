@@ -24,6 +24,7 @@ export function createSimulationState({ mode = 'deathmatch', mapId = 'open', map
       mapId,
       mapSeed,
       matchSeed,
+      nextTrapAt: 60,
       winnerId: null,
       endReason: null,
       gasTickT: 0,
@@ -33,6 +34,8 @@ export function createSimulationState({ mode = 'deathmatch', mapId = 'open', map
     projectiles: new Map(),
     items: new Map(),
     hazards: new Map(),
+    traps: new Map(),
+    nextTrapId: 1,
     areaEffects: new Map(),
     spawnPoints: spawnPoints?.length ? spawnPoints.map((point) => ({ ...point })) : buildSpawnPoints(Math.max(1, players.length)),
     nextSpawnIndex: 0,
@@ -61,7 +64,10 @@ export function addPlayerState(state, player, position = {}) {
     kills: 0,
     deaths: 0,
     superCharge: Number.isFinite(player.superCharge) ? player.superCharge : 0,
-    heldItem: player.heldItem || null,
+    heldItems: Array.isArray(player.heldItems)
+      ? [player.heldItems[0] || null, player.heldItems[1] || null]
+      : [player.heldItem || null, null],
+    heldItem: Array.isArray(player.heldItems) ? player.heldItems[0] || null : player.heldItem || null,
     shieldT: 0,
     parryT: 0,
     speedBoostT: 0,

@@ -31,7 +31,11 @@ async function prepareRenderer() {
   const canvas = document.getElementById('game');
   const requested = new URLSearchParams(location.search).get('renderer');
 
-  if (requested === 'webgl' || !navigator.gpu) {
+  // The current WebGPU path repeatedly destroys its shadow depth texture while
+  // submitting frames on supported desktop drivers. Keep WebGL2 as the stable
+  // default until that renderer lifecycle is verified; retain an explicit opt-in
+  // for diagnosis with ?renderer=webgpu.
+  if (requested !== 'webgpu' || !navigator.gpu) {
     window.__GBH_RENDERER__ = { kind: 'webgl', renderer: null };
     return;
   }

@@ -161,3 +161,50 @@ body.left-handed.touch #action-cluster{right:auto;left:calc(172px + var(--sa-l))
 body.touch.playing #flicker-action{display:grid;right:calc(100% + 14px);bottom:14px}
 body.left-handed.touch #flicker-action{right:auto;left:calc(100% + 14px)}
 @keyframes flickerPulse{0%{transform:scale(1);box-shadow:0 5px #0007,0 0 #8dffb000}to{transform:scale(1.06);box-shadow:0 5px #0007,0 0 20px #8dffb088}}
+
+/* Gameplay controls: keep the existing HUD intact and share one mobile action layout. */
+#action-cluster{position:absolute;inset:0;z-index:5;pointer-events:none}
+#skill-arc{display:contents}
+.skill-reserved,#attack-action{display:none}
+#item-action-2{--item-color:var(--gold);position:absolute;right:calc(220px + var(--sa-r));bottom:calc(40px + var(--sa-b));z-index:6;display:none;place-items:center;width:62px;height:62px;padding:4px;border:4px solid var(--ink);border-radius:20px;background:linear-gradient(155deg,#30245a,#17102f);color:var(--item-color);font-family:var(--font);cursor:pointer;pointer-events:auto;touch-action:manipulation;box-shadow:0 5px #0007,0 0 0 2px #ffffff18;transition:transform .12s,border-color .12s,opacity .12s}
+#item-action-2[data-item=shield]{--item-color:#7ceaff}#item-action-2[data-item=speed]{--item-color:#ffd15c}#item-action-2[data-item=heal]{--item-color:#7dff9a}#item-action-2[data-item=ammo]{--item-color:#ff956d}#item-action-2[data-item=super]{--item-color:#d0a2ff}
+#item-action-2.has-item{border-color:var(--item-color);box-shadow:0 5px #0007,0 0 18px var(--item-color)}
+#item-action-2:enabled:hover{transform:translateY(-2px)}#item-action-2:enabled:active{transform:translateY(2px);box-shadow:0 2px #0007}#item-action-2:disabled{cursor:default;opacity:.44}
+#item-icon-2{font-size:27px;line-height:1;text-shadow:0 2px 8px #0009}
+#item-label-2{position:absolute;bottom:5px;max-width:calc(100% - 8px);overflow:hidden;color:#fff;letter-spacing:.3px;text-overflow:ellipsis;white-space:nowrap;font-size:9px;line-height:1;text-shadow:-1px -1px 0 var(--ink),1px -1px 0 var(--ink),-1px 1px 0 var(--ink),1px 1px 0 var(--ink)}
+#item-key-2{position:absolute;top:-7px;right:-7px;min-width:21px;padding:3px 4px;border:2px solid var(--ink);border-radius:8px;background:var(--gold);color:var(--ink);font-size:10px;line-height:1;text-align:center}
+body.playing:not(.touch) #item-action{right:calc(294px + var(--sa-r))}
+body.playing:not(.touch) #item-action-2{display:grid}
+body.playing:not(.touch) #flicker-action{display:grid;right:calc(140px + var(--sa-r));bottom:calc(40px + var(--sa-b))}
+#flicker-action:disabled{opacity:.72}
+body.touch #action-cluster{inset:auto;right:calc(12px + var(--sa-r));bottom:calc(14px + var(--sa-b));width:252px;height:190px}
+body.touch #skill-arc{display:block;position:absolute;inset:0;pointer-events:none}
+body.touch .skill-reserved{position:absolute;display:block;width:44px;height:44px;border:3px solid #8c9fc8a8;border-radius:50%;background:radial-gradient(circle at 35% 28%,#536994c9,#151b34e8 72%);box-shadow:0 4px #0007,0 0 0 2px #ffffff14}
+body.touch .skill-reserved-one{right:112px;bottom:163px}
+body.touch .skill-reserved-two{right:38px;bottom:151px}
+body.touch #super{position:absolute;right:94px;bottom:82px;width:66px;height:66px;border-width:4px;pointer-events:auto;z-index:3}
+body.touch #super .core{width:48px;height:48px;border-width:3px;font-size:10px}
+body.touch #super.ready .core{font-size:11px}
+body.touch #attack-action{position:absolute;right:0;bottom:0;display:grid;place-items:center;width:84px;height:84px;border:5px solid var(--ink);border-radius:50%;background:radial-gradient(circle at 35% 25%,#5e83d8,#173869 68%,#0a1633);color:#e9f0ff;pointer-events:auto;touch-action:manipulation;cursor:pointer;box-shadow:0 7px #0008,0 0 0 3px #91b6ff88;z-index:4}
+#attack-action:active{transform:scale(.94);box-shadow:0 3px #0008,0 0 0 3px #91b6ff88}
+.attack-icon{font-size:34px;line-height:1;text-shadow:0 2px 6px #0009}
+.attack-label{position:absolute;bottom:8px;font-size:9px;letter-spacing:.4px;text-shadow:0 2px 4px #000}
+body.touch #utility-actions{position:absolute;left:0;bottom:0;display:flex;align-items:center;gap:6px;pointer-events:none}
+body.touch #item-action,body.touch #item-action-2,body.touch #flicker-action{position:relative;inset:auto;display:grid;place-items:center;flex:0 0 auto;width:48px;height:48px;margin:0;padding:3px;border-width:3px;border-radius:50%;pointer-events:auto;touch-action:manipulation}
+body.touch #item-icon,body.touch #item-icon-2{font-size:20px}
+body.touch #item-label,body.touch #item-label-2{bottom:4px;font-size:7px}
+body.touch #item-key,body.touch #item-key-2{top:-5px;right:-5px;min-width:17px;padding:2px 3px;font-size:8px}
+body.touch #flicker-action{width:56px;height:56px;border-radius:50%;border-width:3px}
+body.touch #flicker-icon{font-size:22px}
+body.touch #flicker-label{bottom:4px;font-size:7px}
+body.touch #flicker-key{top:-5px;right:-5px;min-width:21px;padding:2px 3px;font-size:7px}
+body.left-handed.touch #action-cluster{right:auto;left:calc(12px + var(--sa-l))}
+body.left-handed.touch #attack-action{right:auto;left:0}
+body.left-handed.touch .skill-reserved-one{right:auto;left:112px}
+body.left-handed.touch .skill-reserved-two{right:auto;left:38px}
+body.left-handed.touch #super{right:auto;left:94px}
+body.left-handed.touch #utility-actions{left:auto;right:0}
+@media(max-width:340px){body.touch #action-cluster{width:226px;height:184px}body.touch #attack-action{width:76px;height:76px}body.touch #utility-actions{gap:4px}body.touch #item-action,body.touch #item-action-2{width:44px;height:44px}body.touch #flicker-action{width:52px;height:52px}body.touch #super{right:84px;width:60px;height:60px;bottom:78px}body.touch .skill-reserved-one{right:102px;bottom:151px}body.touch .skill-reserved-two{right:28px;bottom:139px}body.left-handed.touch #attack-action{left:0}body.left-handed.touch #super{right:auto;left:84px}body.left-handed.touch .skill-reserved-one{right:auto;left:102px}body.left-handed.touch .skill-reserved-two{right:auto;left:28px}}
+@media(max-height:520px){body.touch #action-cluster{bottom:calc(8px + var(--sa-b))}body.touch #attack-action{width:76px;height:76px}body.touch #super{width:60px;height:60px;bottom:74px}body.touch .skill-reserved-one{bottom:148px}body.touch .skill-reserved-two{bottom:137px}body.left-handed.touch #super{left:94px;right:auto}body.left-handed.touch .skill-reserved-one{left:112px;right:auto}body.left-handed.touch .skill-reserved-two{left:38px;right:auto}}
+@media(min-width:701px) and (max-width:900px){body.playing:not(.touch) #hints{right:calc(400px + var(--sa-r));max-width:calc(100% - 416px);bottom:calc(112px + var(--sa-b))}}
+@media(prefers-reduced-motion:reduce){#attack-action,#item-action-2{transition:none}}

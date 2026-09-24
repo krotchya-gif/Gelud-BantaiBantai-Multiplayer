@@ -24,6 +24,7 @@ export function buildSnapshot(simulation) {
       deaths: player.deaths,
       superCharge: Number((player.superCharge || 0).toFixed(4)),
       heldItem: player.heldItem || null,
+      heldItems: Array.isArray(player.heldItems) ? player.heldItems.slice(0, 2) : [player.heldItem || null, null],
       shieldT: Number((player.shieldT || 0).toFixed(3)),
       parryT: Number((player.parryT || 0).toFixed(3)),
       slowT: Number((player.slowT || 0).toFixed(3)),
@@ -54,6 +55,7 @@ export function buildSnapshot(simulation) {
     projectiles,
     items: [...state.items.values()].filter((item) => item.active).map(({ id, kind, x, z }) => ({ id, kind, x, z })),
     hazards: [...state.hazards.values()],
+    traps: [...state.traps.values()].map((trap) => ({ ...trap, remaining: Number(trap.remaining.toFixed(3)) })),
     areaEffects: [...state.areaEffects.values()].map(({ id, ownerId, kind, x, z, radius, color, remaining }) => ({ id, ownerId, kind, x, z, radius, color, remaining })),
   };
 }

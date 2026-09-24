@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { moveInputSchema, roomCreateSchema, sessionHelloSchema, settingsSchema } from '../../shared/protocol/schemas.js';
+import { itemSchema, moveInputSchema, roomCreateSchema, sessionHelloSchema, settingsSchema } from '../../shared/protocol/schemas.js';
 
 describe('protocol schemas', () => {
   it('accepts bounded movement intent', () => {
@@ -16,5 +16,11 @@ describe('protocol schemas', () => {
     expect(roomCreateSchema.safeParse({ mapId: 'frozen-lake' }).success).toBe(true);
     expect(roomCreateSchema.safeParse({ mapId: 'made-up-map' }).success).toBe(false);
     expect(settingsSchema.safeParse({ mapId: 'gravity-rifts' }).success).toBe(true);
+  });
+
+  it('accepts two independent item slots and defaults legacy item actions to slot one', () => {
+    expect(itemSchema.parse({ actionId: 7 })).toEqual({ actionId: 7, slot: 0 });
+    expect(itemSchema.safeParse({ actionId: 8, slot: 1 }).success).toBe(true);
+    expect(itemSchema.safeParse({ actionId: 9, slot: 2 }).success).toBe(false);
   });
 });

@@ -145,8 +145,7 @@ var Nu = class {
     }
     rebuildFireflies() {
       (this.game.scene.remove(this.fireflies),
-        this.fireflies.geometry.dispose(),
-        this.fireflyMat.dispose(),
+        disposeRendererResources([this.fireflies.geometry, this.fireflyMat]),
         this.buildFireflies());
     }
     flash(e, t, n, r, i, a, o) {

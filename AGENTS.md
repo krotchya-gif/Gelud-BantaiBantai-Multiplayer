@@ -34,6 +34,14 @@ Input client
 - Vektor aim `(0, 0)` dari touch tap atau client lama harus menggunakan arah aim/facing terakhir. Fallback ini harus tetap berlaku di client network session dan `shared/simulation/CombatSystem.js` agar projectile, melee, dan charge tidak kehilangan arah.
 - Protocol menggunakan JSON WebSocket native pada `/ws`, protocol version saat ini `1`, dan kapasitas room maksimum 8 pemain. Perubahan payload harus memperbarui schema dan test terkait.
 
+## Invarian kemampuan, item, trap, dan kontrol
+
+- Flicker memiliki cooldown authoritative yang sama di solo dan multiplayer. HUD touch dan desktop harus menampilkan hitungan sisa cooldown serta state siap; ketika charge penuh tetapi spawn protection atau aksi lain mengunci penggunaan, tampilkan state menunggu. Input keyboard `Shift` dan tombol touch memanggil aksi yang sama.
+- Kontrol gameplay mobile memakai satu layout baku: joystick gerak di kiri bawah; cluster serangan/skill di kanan bawah dengan tiga posisi skill melengkung di sekitar serangan utama; `Super` menempati posisi lengkung paling bawah. Baris utility berisi `Item 1`, `Item 2`, lalu `Flicker`. Posisi ini menjadi pola untuk skill/item baru; jangan merombak HUD lain ketika mengubah cluster tersebut.
+- Item 1 dan Item 2 adalah slot inventori terpisah. Pickup, konsumsi, UI, prediction, bot bila berlaku, schema, dan snapshot harus mempertahankan isi serta aksi tiap slot secara konsisten; kontrol legacy boleh memilih slot pertama sebagai default.
+- Trap berkala berjalan di simulasi authoritative yang dipakai solo dan server. Siklus dimulai tiap 60 detik, memilih lokasi walkable secara seeded dari `matchSeed` dan `mapSeed`, memberi telegraph sebelum aktif, lalu menghasilkan ledakan, burning, atau gas beracun. Render client hanya memvisualisasikan state/event simulasi; ia tidak menentukan hit atau damage.
+- Solo Deathmatch membatasi pemakaian satu karakter maksimal oleh dua bot dalam satu match. Pemilihan roster bot harus tetap deterministik bila seed tersedia dan memakai karakter yang ada di shared roster.
+
 ## Renderer dan asset
 
 Sebagian besar asset adalah geometry/material procedural di `public/engine/`, bukan file model eksternal. Build Vite menyalin seluruh `public/engine/*.js` ke `dist/engine/` dan service worker mem-precache hasil build.
@@ -69,6 +77,7 @@ Pada project ini integration test sebelumnya memang gagal di sandbox, lalu lulus
 - Pertahankan perubahan pengguna yang sudah ada di working tree. Jangan memakai reset/checkout destruktif untuk membersihkan repository.
 - Untuk perubahan protocol atau simulasi, tambahkan regression test yang menguji perilaku authoritative, bukan hanya bentuk implementasinya.
 - Untuk perubahan renderer multiplayer, periksa mode solo dan multiplayer, desktop serta touch, projectile, item, respawn, dan reconnect.
+- Untuk perubahan cluster kontrol, pertahankan target sentuh yang cukup besar, safe-area inset, mode left-handed, dan event multi-touch tanpa konflik antara joystick, Super, dua slot item, dan Flicker.
 - Jalankan `git diff --check`, test yang relevan, build, dan `npm run test:characters` setelah perubahan yang menyentuh engine atau multiplayer.
 - Jika hasil build, ukuran bundle, traffic, atau batasan test berubah, perbarui bagian verifikasi aktual di `README.md` dengan angka hasil run terbaru.
 

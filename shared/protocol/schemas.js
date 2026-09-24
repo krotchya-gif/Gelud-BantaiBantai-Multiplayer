@@ -69,6 +69,7 @@ export const superSchema = z.object({
 
 export const itemSchema = z.object({
   actionId: z.number().int().nonnegative(),
+  slot: z.number().int().min(0).max(1).default(0),
 }).strict();
 
 export const flickerSchema = z.object({

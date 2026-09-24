@@ -576,7 +576,7 @@ var  Ru = 9,
         (this.lastGasWarning = null),
         (this.lastKillLine = ``),
         (this.lastSuper = -1),
-        (this.lastItemUi = ``),
+        (this.lastItemUi = []),
         (this.lastFlickerUi = ``),
         (this.statsT = 0),
         (this.frames = 0),
@@ -587,7 +587,7 @@ var  Ru = 9,
         this.buildSettings());
     }
     setTouchMode(e) {
-      ((this.touch = e), document.body.classList.toggle(`touch`, e), (this.lastSuper = -1), (this.lastItemUi = ``), (this.lastFlickerUi = ``));
+      ((this.touch = e), document.body.classList.toggle(`touch`, e), (this.lastSuper = -1), (this.lastItemUi = []), (this.lastFlickerUi = ``));
     }
     updateSticks() {
       if (!this.touch) return;
@@ -796,7 +796,7 @@ var  Ru = 9,
         }),
         this.selectArena(e.arenaName),
         ($(`mode-badge`).textContent = e.mode.label.toUpperCase()),
-        ($(`renderer-info`).textContent = `Renderer aktif: ${e.pipeline.isWebGPU ? `WebGPU` : `WebGL2 (fallback)`}`),
+        ($(`renderer-info`).textContent = `Renderer aktif: ${e.pipeline.isWebGPU ? `WebGPU (eksperimental)` : `WebGL2`}`),
         ($(`auto-time`).checked = e.autoTime),
         ($(`tog-ao`).checked = e.pipeline.toggles.ao),
         ($(`tog-ao`).disabled = e.pipeline.isWebGPU || !e.pipeline.quality.ao),
@@ -1013,7 +1013,8 @@ var  Ru = 9,
       this.updateMatchStatus(e);
       let a = t.player,
         o = a ? Math.round(a.superCharge * 100) : 0;
-      this.syncItemButton(a);
+      this.syncItemButton(a, 0);
+      this.syncItemButton(a, 1);
       this.syncFlickerButton(a);
       if (o !== this.lastSuper) {
         this.lastSuper = o;
@@ -1063,14 +1064,16 @@ var  Ru = 9,
             : `quality: auto  (night frame ${t.perf.benchMs ? t.perf.benchMs.toFixed(1) : `?`} ms at startup)`);
       }
     }
-    syncItemButton(player) {
-      let button = $(`item-action`),
-        item = player?.heldItem || null,
-        canUse = !!item && this.game.state === `playing` && !this.game.paused && player.canUseHeldItem(),
+    syncItemButton(player, slot = 0) {
+      slot = slot === 1 ? 1 : 0;
+      let suffix = slot === 1 ? `-2` : ``,
+        button = $(`item-action${suffix}`),
+        item = player?.heldItems?.[slot] || (slot === 0 ? player?.heldItem : null) || null,
+        canUse = !!item && this.game.state === `playing` && !this.game.paused && player.canUseHeldItem(slot),
         isFocusAmmo = item === `ammo` && [`ello`, `syafiah`].includes(player?.def?.id),
         signature = `${player?.def?.id || ``}:${item || ``}:${+canUse}:${this.touch ? `touch` : `keys`}`;
-      if (signature === this.lastItemUi) return;
-      this.lastItemUi = signature;
+      if (signature === this.lastItemUi[slot]) return;
+      this.lastItemUi[slot] = signature;
       let meta = {
         shield: { icon: `🛡️`, label: `SHIELD`, title: `Damage reduced by 65% for 3 seconds` },
         speed: { icon: `⚡`, label: `SPEED`, title: `Move 35% faster for 4 seconds` },
@@ -1079,19 +1082,20 @@ var  Ru = 9,
         super: { icon: `✦`, label: `SUPER`, title: `Charge 25% of your Super meter` },
       }[item];
       if (isFocusAmmo) meta = { ...meta, label: `FOCUS`, title: `Focus charge` };
-      (($(`item-icon`).textContent = meta?.icon || `◇`),
-        ($(`item-label`).textContent = meta?.label || `ITEM`),
-        ($(`item-key`).textContent = this.touch ? `TAP` : `F`),
+      (($(`item-icon${suffix}`).textContent = meta?.icon || `◇`),
+        ($(`item-label${suffix}`).textContent = meta?.label || `ITEM ${slot + 1}`),
+        ($(`item-key${suffix}`).textContent = this.touch ? `TAP` : slot === 0 ? `F` : `G`),
         (button.dataset.item = item || `empty`),
         button.classList.toggle(`has-item`, !!item),
         (button.disabled = !canUse),
-        button.setAttribute(`aria-label`, item ? `${meta.label}. ${meta.title}${canUse ? `. Activate now` : `. Not available yet`}` : `No item held`),
-        (button.title = item ? `${meta.title} — ${this.touch ? `tap to use` : `press F to use`}` : `No item held`));
+        button.setAttribute(`aria-label`, item ? `Item ${slot + 1}: ${meta.label}. ${meta.title}${canUse ? `. Activate now` : `. Not available yet`}` : `Item ${slot + 1} empty`),
+        (button.title = item ? `${meta.title} — ${this.touch ? `tap to use` : `press ${slot === 0 ? `F` : `G`} to use`}` : `Item ${slot + 1} empty`));
     }
     syncFlickerButton(player) {
       let button = $(`flicker-action`),
         remaining = Number.isFinite(player?.flickerRemaining) ? player.flickerRemaining : 30,
-        ready = !!player && player.alive && this.game.state === `playing` && !this.game.paused && remaining <= 0.001,
+        charged = remaining <= 0.001,
+        ready = !!player && player.alive && (player.spawnT || 0) <= 0 && !player.burst && player.canAct() && this.game.state === `playing` && !this.game.paused && charged,
         progress = Math.round($c(1 - remaining / 30, 0, 1) * 100),
         signature = `${ready}:${Math.ceil(remaining * 10)}:${this.touch}`;
       if (signature === this.lastFlickerUi) return;
@@ -1099,10 +1103,10 @@ var  Ru = 9,
       button.style.setProperty(`--p`, progress);
       button.classList.toggle(`ready`, ready);
       button.disabled = !ready;
-      $(`flicker-label`).textContent = ready ? `FLICKER` : `${Math.ceil(remaining)}s`;
+      $(`flicker-label`).textContent = ready ? `FLICKER` : charged ? `WAIT` : `${Math.ceil(remaining)}s`;
       $(`flicker-key`).textContent = this.touch ? `TAP` : `SHIFT`;
-      button.setAttribute(`aria-label`, ready ? `Flicker ready. ${this.touch ? `Tap` : `Press Shift`} to dodge` : `Flicker recharging. ${Math.ceil(remaining)} seconds remaining`);
-      button.title = ready ? `${this.touch ? `Tap` : `Press Shift`} to dodge` : `Flicker recharging — ${Math.ceil(remaining)}s`;
+      button.setAttribute(`aria-label`, ready ? `Flicker ready. ${this.touch ? `Tap` : `Press Shift`} to dodge` : charged ? `Flicker charged, but temporarily unavailable` : `Flicker recharging. ${Math.ceil(remaining)} seconds remaining`);
+      button.title = ready ? `${this.touch ? `Tap` : `Press Shift`} to dodge` : charged ? `Flicker charged — wait until your current action or respawn protection ends` : `Flicker recharging — ${Math.ceil(remaining)}s`;
     }
   },
   Xu = class {

@@ -37,23 +37,38 @@
         <ol id="dm-leaderboard-list"></ol>
       </div>
       <div id="banner" class="outline"></div>
-      <div id="hints"><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> move &nbsp; <kbd>Mouse</kbd> aim &nbsp; <kbd>Click</kbd> shoot<br /><kbd>Space</kbd> / <kbd>Right-click</kbd> hold to aim super, release to fire<br /><kbd>Shift</kbd> flicker &nbsp; <kbd>F</kbd> use item &nbsp; <kbd>T</kbd> time of day &nbsp; <kbd>P</kbd> pause &nbsp; <kbd>M</kbd> mute</div>
+      <div id="hints"><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> move &nbsp; <kbd>Mouse</kbd> aim &nbsp; <kbd>Click</kbd> shoot<br /><kbd>Space</kbd> / <kbd>Right-click</kbd> hold to aim super, release to fire<br /><kbd>Shift</kbd> flicker &nbsp; <kbd>F</kbd> item 1 &nbsp; <kbd>G</kbd> item 2 &nbsp; <kbd>T</kbd> time of day &nbsp; <kbd>P</kbd> pause &nbsp; <kbd>M</kbd> mute</div>
       <div id="sticks">
         <div class="stick" id="stick-move"><i></i><b>MOVE</b></div>
         <div class="stick" id="stick-aim"><i></i><b>DRAG TO AIM &middot; TAP TO AUTO-AIM</b></div>
       </div>
       <div id="action-cluster">
-        <button id="flicker-action" type="button" disabled aria-label="Flicker recharging" title="Flicker recharging">
-          <span class="flicker-icon" id="flicker-icon" aria-hidden="true">✦</span>
-          <span class="flicker-label" id="flicker-label">30s</span>
-          <span class="flicker-key" id="flicker-key">SHIFT</span>
+        <div id="skill-arc" aria-label="Skill buttons">
+          <span class="skill-reserved skill-reserved-one" aria-hidden="true"></span>
+          <span class="skill-reserved skill-reserved-two" aria-hidden="true"></span>
+          <div id="super"><div class="core" id="super-core">SUPER</div></div>
+        </div>
+        <button id="attack-action" type="button" aria-label="Basic attack">
+          <span class="attack-icon" aria-hidden="true">⚔</span>
+          <span class="attack-label">ATTACK</span>
         </button>
-        <div id="super"><div class="core" id="super-core">SUPER</div></div>
-        <button id="item-action" type="button" disabled aria-label="No item held" title="No item held">
-          <span class="item-icon" id="item-icon" aria-hidden="true">◇</span>
-          <span class="item-label" id="item-label">ITEM</span>
-          <span class="item-key" id="item-key">F</span>
-        </button>
+        <div id="utility-actions" aria-label="Items and dodge">
+          <button id="item-action" type="button" disabled aria-label="Item 1 empty" title="Item 1 empty">
+            <span class="item-icon" id="item-icon" aria-hidden="true">◇</span>
+            <span class="item-label" id="item-label">ITEM 1</span>
+            <span class="item-key" id="item-key">F</span>
+          </button>
+          <button id="item-action-2" type="button" disabled aria-label="Item 2 empty" title="Item 2 empty">
+            <span class="item-icon" id="item-icon-2" aria-hidden="true">◇</span>
+            <span class="item-label" id="item-label-2">ITEM 2</span>
+            <span class="item-key" id="item-key-2">G</span>
+          </button>
+          <button id="flicker-action" type="button" disabled aria-label="Flicker recharging" title="Flicker recharging">
+            <span class="flicker-icon" id="flicker-icon" aria-hidden="true">✦</span>
+            <span class="flicker-label" id="flicker-label">30s</span>
+            <span class="flicker-key" id="flicker-key">SHIFT</span>
+          </button>
+        </div>
       </div>
     </div>
 

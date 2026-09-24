@@ -74,8 +74,8 @@ export class MatchRunner {
     return this.simulation.super(playerId, payload);
   }
 
-  acceptItem(playerId) {
-    return this.simulation.item(playerId);
+  acceptItem(playerId, slot = 0) {
+    return this.simulation.item(playerId, slot);
   }
 
   acceptFlicker(playerId, payload) {

@@ -155,7 +155,7 @@ var Su = class {
         e.hp <= 0 &&
           ((e.alive = !1),
           this.game.scene.remove(e.mesh),
-          e.mat.dispose(),
+          disposeRendererResources([e.mat]),
           this.game.world.setBlocker(e.tx, e.ty, !1),
           this.game.effects.debris(e.x, 0.5, e.z, 6968470, 9),
           this.game.effects.burst(e.x, 0.6, e.z, this.cubeLight, 16, 4.5),
@@ -732,14 +732,18 @@ var Su = class {
           r.addLight(x, y + 0.1, z, this.itemLights[item.kind], 1.5 + r.night, 3.2));
         if (arc < 1) continue;
         for (let brawler of t.brawlers) {
-          if (!brawler.alive || brawler.airborne || brawler.heldItem || Math.hypot(brawler.x - item.x, brawler.z - item.z) >= 0.82) continue;
+          if (!brawler.alive || brawler.airborne || Math.hypot(brawler.x - item.x, brawler.z - item.z) >= 0.82) continue;
+          brawler.heldItems ||= [brawler.heldItem || null, null];
+          const slot = brawler.heldItems.findIndex((held) => !held);
+          if (slot < 0) continue;
           let kind = item.kind;
           let label = kind === `ammo` && !brawler.usesAmmo ? `FOCUS` : kind.toUpperCase();
-          ((brawler.heldItem = kind),
+          ((brawler.heldItems[slot] = kind),
+            (brawler.heldItem = brawler.heldItems[0] || null),
             this.removeItem(item),
             i.burst(item.x, 0.7, item.z, this.itemLights[kind], 10, 3.1),
             (!brawler.hidden || brawler.isPlayer) && t.hud.floatText(brawler.x, 2, brawler.z, `${label}!`, `power`),
-            brawler.isPlayer && t.hud.toast(`${label} READY · TAP ITEM OR PRESS F`),
+            brawler.isPlayer && t.hud.toast(`${label} READY · SLOT ${slot + 1} · PRESS ${slot === 0 ? `F` : `G`}`),
             t.audio.play(`pickup`, item.x, item.z));
           break;
         }
@@ -757,7 +761,7 @@ var Su = class {
       this.arrowFalls.length = 0;
       for (let e of this.bombs) ((e.slot.busy = !1), (e.slot.group.visible = !1), (e.slot.ring.visible = !1));
       this.bombs.length = 0;
-      for (let t of this.boxes) (t.alive && e.remove(t.mesh), t.mat.dispose());
+      for (let t of this.boxes) (t.alive && e.remove(t.mesh), disposeRendererResources([t.mat]));
       this.boxes.length = 0;
       for (let t of this.cubes) (e.remove(t.mesh), (t.mesh.visible = !1), (t.alive = !1), this.cubePool.push(t));
       this.cubes.length = 0;

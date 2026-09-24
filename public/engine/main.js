@@ -75,6 +75,9 @@ var ld = class {
       (this.input.onTouchMode = (e) => this.hud.setTouchMode(e)),
       (this.elapsed = 0),
       (this.matchTime = 0),
+      (this.timedTraps = new Map()),
+      (this.nextTrapAt = 60),
+      (this.nextTrapId = 1),
       (this.state = `menu`),
       (this.brawlers = []),
       (this.brains = []),
@@ -130,7 +133,8 @@ var ld = class {
         let t = Uu(e);
         (t === `KeyT` && this.cycleTime(),
           t === `KeyM` && this.setMuted(!this.audio.muted),
-          t === `KeyF` && this.useHeldItem() && e.preventDefault(),
+          t === `KeyF` && this.useHeldItem(0) && e.preventDefault(),
+          t === `KeyG` && this.useHeldItem(1) && e.preventDefault(),
           t === `KeyP` && [`countdown`, `playing`].includes(this.state) && this.setPaused(!this.paused),
           t === `Escape` &&
             (this.paused
@@ -139,38 +143,49 @@ var ld = class {
       }),
       this.hud.syncSettings(),
       (() => {
-        let button = $(`item-action`),
-          touchActivationAt = 0,
-          touchPointerId = null;
+        for (const [buttonId, slot] of [[`item-action`, 0], [`item-action-2`, 1]]) {
+          let button = $(buttonId), touchActivationAt = 0, touchPointerId = null;
+          button.addEventListener(`pointerdown`, (event) => {
+            if (event.pointerType !== `touch`) return;
+            event.preventDefault(); event.stopPropagation();
+            touchPointerId = event.pointerId; touchActivationAt = performance.now();
+            this.useHeldItem(slot);
+          });
+          window.addEventListener(`pointerup`, (event) => {
+            if (event.pointerId !== touchPointerId) return;
+            touchPointerId = null; touchActivationAt = performance.now();
+          });
+          window.addEventListener(`pointercancel`, (event) => {
+            if (event.pointerId !== touchPointerId) return;
+            touchPointerId = null; touchActivationAt = 0;
+          });
+          button.addEventListener(`click`, (event) => {
+            let generatedByTouch = event.pointerType === `touch` || (!event.pointerType && touchActivationAt > 0 && event.detail > 0 && performance.now() - touchActivationAt < 800);
+            if (generatedByTouch) { touchActivationAt = 0; event.preventDefault(); event.stopPropagation(); return; }
+            this.useHeldItem(slot);
+          });
+        }
+      })(),
+      (() => {
+        let button = $(`attack-action`), touchActivationAt = 0, touchPointerId = null;
+        const queueAttack = () => this.input.shots.push({ kind: `attack`, x: 0, y: 0, mag: 0, tap: !0, held: 0, cancelled: !1 });
         button.addEventListener(`pointerdown`, (event) => {
           if (event.pointerType !== `touch`) return;
-          event.preventDefault();
-          event.stopPropagation();
-          touchPointerId = event.pointerId;
-          touchActivationAt = performance.now();
-          this.useHeldItem();
+          event.preventDefault(); event.stopPropagation();
+          touchPointerId = event.pointerId; touchActivationAt = performance.now(); queueAttack();
         });
         window.addEventListener(`pointerup`, (event) => {
           if (event.pointerId !== touchPointerId) return;
-          touchPointerId = null;
-          touchActivationAt = performance.now();
+          touchPointerId = null; touchActivationAt = performance.now();
         });
         window.addEventListener(`pointercancel`, (event) => {
           if (event.pointerId !== touchPointerId) return;
-          touchPointerId = null;
-          touchActivationAt = 0;
+          touchPointerId = null; touchActivationAt = 0;
         });
         button.addEventListener(`click`, (event) => {
-          let generatedByTouch =
-            event.pointerType === `touch` ||
-            (!event.pointerType && touchActivationAt > 0 && event.detail > 0 && performance.now() - touchActivationAt < 800);
-          if (generatedByTouch) {
-            touchActivationAt = 0;
-            event.preventDefault();
-            event.stopPropagation();
-            return;
-          }
-          this.useHeldItem();
+          let generatedByTouch = event.pointerType === `touch` || (!event.pointerType && touchActivationAt > 0 && event.detail > 0 && performance.now() - touchActivationAt < 800);
+          if (generatedByTouch) { touchActivationAt = 0; event.preventDefault(); event.stopPropagation(); return; }
+          queueAttack();
         });
       })(),
       (() => {
@@ -242,6 +257,7 @@ var ld = class {
         this.mobileDefaultEffects[e] && ((this.pipeline.toggles[e] = !0), (this.mobileDefaultEffects[e] = !1));
       })),
       this.pipeline.setQuality(e),
+      this.perf && ((this.perf.t = 0), (this.perf.frames = 0)),
       this.effects?.setQuality(this.pipeline.quality.tier),
       this.gas?.setQuality(this.pipeline.quality.tier),
       this.lighting.applyQuality(this.pipeline.quality),
@@ -331,6 +347,7 @@ var ld = class {
     for (let e of this.brains) e.skill = $c(el(0.38, 0.96, n) + (e.b.id % 3) * 0.025, 0.3, 1);
   }
   clearEntities() {
+    this.clearTimedTraps();
     for (let e of this.brawlers) e.dispose();
     ((this.brawlers = []),
       (this.brains = []),
@@ -355,6 +372,10 @@ var ld = class {
       r = cd(Vc.slice()),
       i = Object.keys(Bc),
       a = Lc.bots + 1;
+    const balanceDeathmatchRoster = this.modeName === `deathmatch`;
+    const deathmatchBotRoster = balanceDeathmatchRoster
+      ? createBalancedBotRoster(i, a - (e ? 1 : 0), t.seed)
+      : null;
     const candidates = [];
     for (let tileZ = 3; tileZ <= 40; tileZ += 1) {
       for (let tileX = 3; tileX <= 40; tileX += 1) {
@@ -386,7 +407,8 @@ var ld = class {
     for (let o = 0; o < a; o++) {
       let point = spawnPoint(o),
         c = o === 0 && !!e,
-        l = Bc[c ? e : i[(o + Math.floor(Math.random() * i.length)) % i.length]],
+        characterId = c ? e : balanceDeathmatchRoster ? deathmatchBotRoster.shift() : i[(o + Math.floor(Math.random() * i.length)) % i.length],
+        l = Bc[characterId],
         u = new fu(this, l, {
           isPlayer: c,
           name: c ? `YOU` : r[o % r.length],
@@ -419,22 +441,24 @@ var ld = class {
       changed && t && this.hud.toast(r ? `Paused - press P or Escape to resume` : `Resumed`));
     return !0;
   }
-  useHeldItem() {
+  useHeldItem(slot = 0) {
+    slot = slot === 1 ? 1 : 0;
     if (this.networkSession) {
       const player = this.player;
-      if (this.paused || this.state !== `playing` || !player?.heldItem) return !1;
-      this.networkSession.sendItem();
+      const item = player?.heldItems?.[slot] || (slot === 0 ? player?.heldItem : null);
+      if (this.paused || this.state !== `playing` || !item) return !1;
+      this.networkSession.sendItem(slot);
       this.vibrate(12);
       return !0;
     }
-    if (this.paused || this.state !== `playing` || !this.player?.useHeldItem()) return !1;
+    if (this.paused || this.state !== `playing` || !this.player?.useHeldItem(slot)) return !1;
     this.vibrate(12);
     return !0;
   }
   useFlicker() {
     const player = this.player;
     if (this.networkSession) {
-      if (this.paused || this.state !== `playing` || !player?.alive || player.burst || !player.flickerReady) return !1;
+      if (this.paused || this.state !== `playing` || !player?.alive || player.spawnT > 0 || player.burst || player.flicker || player.networkFlicker || player.dash || player.leap || !player.flickerReady) return !1;
       const axis = this.input.axis();
       const aim = this.networkAimDirection(player, axis) || { x: Math.sin(player.facing), z: Math.cos(player.facing) };
       const length = Math.hypot(axis.x, axis.z);
@@ -499,6 +523,7 @@ var ld = class {
       (this.lastRespawnCountdown = 0),
       (this.lastShieldCountdown = 0),
       (this.matchTime = 0),
+      this.resetTimedTraps(),
       (this.pendingResult = null),
       (this.shakeAmp = 0),
       this.focus.set(this.player.x, 0, this.player.z),
@@ -528,6 +553,9 @@ var ld = class {
     this.networkProjectileMaterials = new Map();
     this.networkItems = new Map();
     this.networkAreaPulse = new Map();
+    this.networkAreaMarkers = new Map();
+    this.networkArrowFalls = [];
+    this.networkTrapMarkers = new Map();
     if (!session.__gameBound) {
       session.__gameBound = true;
       session.addEventListener(`game-event`, ({ detail }) => this.handleNetworkEvent(detail));
@@ -627,12 +655,27 @@ var ld = class {
       dash.t += dt;
       const amount = $c(dash.t / dash.duration, 0, 1);
       const eased = amount * amount * (3 - 2 * amount);
-      entity.root.position.set(el(dash.fromX, dash.toX, eased), 0, el(dash.fromZ, dash.toZ, eased));
+      const leapHeight = dash.leap ? Math.sin(amount * Math.PI) * 3.4 : 0;
+      entity.root.position.set(el(dash.fromX, dash.toX, eased), leapHeight, el(dash.fromZ, dash.toZ, eased));
       entity.vel.set(dash.dx * 5, dash.dz * 5);
-      if (amount >= 1) { entity.networkDash = null; entity.squash = 1.1; }
+      if (amount >= 1) {
+        entity.networkDash = null;
+        entity.root.position.y = 0;
+        if (dash.leap) {
+          entity.model.body.rotation.x = 0;
+          entity.squash = 1.4;
+          if (entity.networkPendingSlam) {
+            const slam = entity.networkPendingSlam;
+            this.effects.slam(slam.x, slam.z, slam.radius, slam.color);
+            this.audio.play(`boomBig`, slam.x, slam.z);
+            entity.networkPendingSlam = null;
+          }
+        } else entity.squash = 1.1;
+      }
     }
     entity.isCharging = entity.networkCharging === true;
     entity.animate(dt, moving && entity.alive);
+    if (entity.networkDash?.leap) entity.model.body.rotation.x = $c(entity.networkDash.t / entity.networkDash.duration, 0, 1) * Math.PI * 2;
   }
   startNetworkFlicker(entity, event) {
     if (!entity) return;
@@ -769,7 +812,8 @@ var ld = class {
         entity.deaths = remote.deaths || 0;
         entity.alive = remote.alive;
         entity.superCharge = remote.superCharge || 0;
-        entity.heldItem = remote.heldItem || null;
+        entity.heldItems = Array.isArray(remote.heldItems) ? remote.heldItems.slice(0, 2) : [remote.heldItem || null, null];
+        entity.heldItem = entity.heldItems[0] || null;
         entity.shieldT = remote.shieldT || 0;
         entity.parryT = remote.parryT || 0;
         entity.slowT = remote.slowT || 0;
@@ -809,7 +853,8 @@ var ld = class {
           this.player.kills = local.kills || 0;
           this.player.deaths = local.deaths || 0;
           this.player.superCharge = local.superCharge || 0;
-          this.player.heldItem = local.heldItem || null;
+          this.player.heldItems = Array.isArray(local.heldItems) ? local.heldItems.slice(0, 2) : [local.heldItem || null, null];
+          this.player.heldItem = this.player.heldItems[0] || null;
           this.player.shieldT = local.shieldT || 0;
           this.player.speedBoostT = local.speedBoostT || 0;
           this.player.itemSpeedT = local.itemSpeedT || 0;
@@ -831,8 +876,10 @@ var ld = class {
       this.syncNetworkProjectiles(snapshot.projectiles || []);
       this.syncNetworkItems(snapshot.items || []);
       this.syncNetworkAreas(snapshot.areaEffects || []);
+      this.syncNetworkTraps(snapshot.traps || []);
       if (this.modeName !== `deathmatch`) this.gas.update(e, this.matchTime, false);
     }
+    this.updateNetworkArrowFalls(e);
     this.updateVisibility();
     this.updateTime(e);
     this.updateCamera(e);
@@ -860,20 +907,34 @@ var ld = class {
     if (event.type === `DAMAGE`) {
       const target = this.networkEntities.get(event.targetId);
       if (target && target.isPlayer) this.onPlayerHurt(event.amount);
-      target && this.effects.impact(target.x, 0.72, target.z, target.lightColor, 5);
+      if (target) {
+        target.flash = Math.max(target.flash || 0, 0.45);
+        this.effects.impact(target.x, 0.72, target.z, target.lightColor, 8);
+        this.audio.play(`hit`, target.x, target.z);
+      }
     } else if (event.type === `DEATH`) {
       const target = this.networkEntities.get(event.targetId);
       if (target) {
         target.alive = false;
         target.root.visible = false;
         this.effects.defeat(target.x, target.z, target.lightColor);
+        this.audio.play(`down`, target.x, target.z);
       }
       const attacker = event.attackerId ? this.networkEntities.get(event.attackerId) : null;
       const victim = target;
       if (attacker && victim) this.hud.feed(`<span class="k">${attacker.name}</span> ⚔ <span class="v">${victim.name}</span>`);
     } else if (event.type === `RESPAWN`) {
       const target = this.networkEntities.get(event.playerId);
-      if (target) { target.alive = true; target.hp = target.maxHp; target.root.visible = true; target.root.position.set(event.x, 0, event.z); }
+      if (target) {
+        target.alive = true;
+        target.hp = target.maxHp;
+        target.root.visible = true;
+        target.root.position.set(event.x, 0, event.z);
+        target.networkDash = null;
+        target.networkPendingSlam = null;
+        target.model.body.rotation.x = 0;
+        this.effects.burst(event.x, 0.7, event.z, target.superColor, 12, 2.5);
+      }
     } else if (event.type === `PROJECTILE_SPAWN`) {
       const projectile = event.projectile;
       if (!projectile || !entity) return;
@@ -881,15 +942,36 @@ var ld = class {
       entity.recoil = 1;
       entity.squash = -0.28;
       const color = new J(projectile.color || (projectile.electric ? 0x40ffff : 0xffc56c));
-      if (projectile.electric) this.effects.electricMuzzle(entity.x, 0.72, entity.z, projectile.dirX, projectile.dirZ, color, projectile.isSuper ? 1.4 : 1);
-      else this.effects.muzzle(entity.x, 0.72, entity.z, projectile.dirX, projectile.dirZ, color, projectile.isSuper ? 1.45 : 1);
+      const shotAt = performance.now();
+      if (shotAt - (entity.networkShotAt || -Infinity) > 35) {
+        entity.networkShotAt = shotAt;
+        const muzzle = entity.muzzleWorld(new H());
+        if (projectile.kind === `bomb`) this.audio.play(`lob`, entity.x, entity.z);
+        else if (projectile.electric) {
+          this.effects.electricMuzzle(muzzle.x, muzzle.y, muzzle.z, projectile.dirX, projectile.dirZ, color, projectile.isSuper ? 1.15 : 0.8);
+          this.audio.play(projectile.isSuper ? `zapBig` : `zap`, entity.x, entity.z);
+        } else {
+          this.effects.muzzle(muzzle.x, muzzle.y, muzzle.z, projectile.dirX, projectile.dirZ, color, projectile.isSuper ? 1.6 : 1.1);
+          this.audio.play(entity.def.attack.kind === `spread` ? (projectile.isSuper ? `blastBig` : `blast`) : (projectile.isSuper ? `shotBig` : `shot`), entity.x, entity.z);
+        }
+      }
     } else if (event.type === `PROJECTILE_DESTROY`) {
       const color = new J(event.color || (event.electric ? 0x40ffff : 0xffc56c));
       if (event.electric) this.effects.electricImpact(event.x, 0.72, event.z, color, false);
       else this.effects.impact(event.x, 0.72, event.z, color, 5);
     } else if (event.type === `EXPLOSION`) {
       const color = new J(event.color || (event.super ? entity?.superColor : entity?.lightColor) || 0xffa15b);
-      this.effects.explosion(event.x, event.z, event.radius || 1.4, color, event.super === true);
+      if (event.super && entity?.def.super.kind === `leap`) {
+        if (entity.networkDash?.leap) entity.networkPendingSlam = { x: event.x, z: event.z, radius: event.radius || 2.3, color };
+        else {
+          this.effects.slam(event.x, event.z, event.radius || 2.3, color);
+          this.audio.play(`boomBig`, event.x, event.z);
+        }
+      }
+      else {
+        this.effects.explosion(event.x, event.z, event.radius || 1.4, color, event.super === true);
+        this.audio.play(event.super ? `boomBig` : `boom`, event.x, event.z);
+      }
       if (entity?.isPlayer) this.shakeAmp = Math.max(this.shakeAmp, event.super ? 0.36 : 0.2);
     } else if (event.type === `FLICKER`) {
       if (entity) {
@@ -899,20 +981,25 @@ var ld = class {
         } else {
           this.startNetworkFlicker(entity, event);
         }
+        this.audio.play(`zap`, event.fromX, event.fromZ);
       }
     } else if (event.type === `SUPER_DASH`) {
       if (entity) {
         const duration = entity.def.id === `titan` ? entity.def.super.flight || 0.75 : entity.def.super.flight || 0.22;
         const dx = event.toX - event.fromX; const dz = event.toZ - event.fromZ;
         const length = Math.hypot(dx, dz) || 1;
-        entity.networkDash = { ...event, dx: dx / length, dz: dz / length, t: 0, duration };
+        entity.networkDash = { ...event, dx: dx / length, dz: dz / length, t: 0, duration, leap: entity.def.super.kind === `leap` };
         entity.recoil = 1; entity.squash = -0.35;
         this.effects.dust(event.fromX, event.fromZ, entity.def.id === `titan` ? 10 : 6, entity.def.id === `titan` ? 2.4 : 1.6);
+        this.audio.play(entity.networkDash.leap ? `leap` : `shotBig`, event.fromX, event.fromZ);
       }
     } else if (event.type === `PARRY_WINDOW`) {
       if (entity) { entity.parryT = event.duration || 0.45; entity.recoil = 1; }
     } else if (event.type === `PARRY`) {
-      if (entity) this.effects.impact(entity.x, 0.82, entity.z, entity.superColor, 12);
+      if (entity) {
+        this.effects.impact(entity.x, 0.82, entity.z, entity.superColor, 12);
+        this.audio.play(`shotBig`, entity.x, entity.z);
+      }
     } else if (event.type === `ATTACK_CHARGE`) {
       if (entity) { entity.networkCharging = true; entity.chargeLevel = 0; }
     } else if (event.type === `ATTACK_RELEASE`) {
@@ -922,13 +1009,33 @@ var ld = class {
       const z = Number.isFinite(event.targetZ) ? event.targetZ : event.z ?? entity?.z;
       if (Number.isFinite(x) && Number.isFinite(z)) {
         const color = new J(event.color || entity?.superColor || 0xd0a2ff);
-        if (event.type === `SUPER_ZONE`) this.effects.ring(x, z, event.radius || 3, color, 0.6, 2.3);
-        else if (event.type === `SUPER_WAVE`) this.effects.explosion(x, z, event.radius || 1.4, color, true);
-        else this.effects.burst(x, 0.7, z, color, 14, 3);
+        if (event.type === `SUPER_ZONE`) this.ensureNetworkAreaMarker({ ...event, kind: `arrow-shower` });
+        else if (event.type === `SUPER_WAVE`) {
+          this.spawnNetworkArrowFalls(x, z, event.radius || 3.4);
+          this.effects.impact(x, 0.08, z, color, 18);
+          this.audio.play(`hit`, x, z);
+        } else {
+          this.effects.burst(x, 0.7, z, color, 14, 3);
+          this.audio.play(`super`, entity?.x ?? x, entity?.z ?? z);
+        }
       }
+    } else if (event.type === `AREA_END`) {
+      const marker = this.networkAreaMarkers?.get(event.id);
+      if (marker) {
+        this.scene.remove(marker);
+        this.networkAreaMarkers.delete(event.id);
+      }
+    } else if (event.type === `TRAP_WARNING`) {
+      this.hud.banner(`RED ZONE — MOVE!`, 1.8, !0);
+    } else if (event.type === `TRAP_EXPLOSION`) {
+      this.effects.explosion(event.x, event.z, event.radius || 3.6, new J(0xff4b42), !0);
+      this.audio.play(`boomBig`, event.x, event.z);
+      this.shake(0.42, event.x, event.z);
     } else if (event.type === `ITEM_PICKUP` || event.type === `ITEM_USED`) {
       const x = entity?.x || 0; const z = entity?.z || 0;
-      this.effects.burst(x, 0.7, z, entity?.superColor || 0xffc93a, 8, 2.5);
+      const color = this.combat.itemLights[event.kind] || entity?.superColor || new J(0xffc93a);
+      this.effects.burst(x, 0.7, z, color, 8, 2.5);
+      this.audio.play(`pickup`, x, z);
     } else if (event.type === `MELEE_SWING`) {
       if (!entity) return;
       entity.recoil = 0.9; entity.squash = -0.2;
@@ -939,6 +1046,7 @@ var ld = class {
         entity.punch[(event.attackSerial || 0) % 2] = 1;
         this.effects.impact(entity.x + Math.sin(entity.facing) * 1.15, 0.72, entity.z + Math.cos(entity.facing) * 1.15, entity.lightColor, 7);
       }
+      this.audio.play(entity.def.id === `ello` ? `shotBig` : `punch`, entity.x, entity.z);
     }
   }
   ensureNetworkProjectile(projectile) {
@@ -984,6 +1092,7 @@ var ld = class {
       mesh.rotation.y = Math.atan2(projectile.dirX, projectile.dirZ);
       const scale = projectile.kind === `bomb` ? (projectile.isSuper ? 1.75 : 1.3) : projectile.radius > 0.25 ? 1.45 : 1;
       mesh.scale.setScalar(scale);
+      this.lighting.addLight(projectile.x, 0.72 + (projectile.height || 0), projectile.z, mesh.material.color, projectile.isSuper ? 2.6 : 1.9, 4.2);
       const trailsEnabled = this.pipeline.quality.tier > 0 && !this.lowEndDevice;
       if (trailsEnabled && this.elapsed - mesh.userData.trailAt > (projectile.electric ? 0.032 : 0.055)) {
         mesh.userData.trailAt = this.elapsed;
@@ -1018,16 +1127,66 @@ var ld = class {
       mesh.position.set(item.x, 0.55 + Math.sin(this.elapsed * 4 + item.x) * 0.08, item.z);
       mesh.rotation.y += item.kind === `super` ? 0.075 : 0.04;
       mesh.rotation.z = item.kind === `super` ? Math.PI / 4 : 0;
+      this.lighting.addLight(item.x, mesh.position.y + 0.1, item.z, this.combat.itemLights[item.kind] || mesh.material.color, 1.5 + this.lighting.night, 3.2);
     }
     for (const [id, mesh] of this.networkItems) {
       if (seen.has(id)) continue;
       mesh.visible = false;
     }
   }
+  ensureNetworkAreaMarker(area) {
+    if (!area?.id || area.kind !== `arrow-shower` || !this.networkAreaMarkers) return;
+    let marker = this.networkAreaMarkers.get(area.id);
+    if (!marker) {
+      marker = new ut();
+      const disc = new Ln(this.combat.arrowShowerDiscGeometry, this.combat.arrowShowerDiscMaterial);
+      const ring = new Ln(this.combat.arrowShowerRingGeometry, this.combat.arrowShowerRingMaterial);
+      disc.userData.noAO = ring.userData.noAO = marker.userData.noAO = true;
+      disc.renderOrder = ring.renderOrder = marker.renderOrder = 3;
+      marker.add(disc, ring);
+      this.scene.add(marker);
+      this.networkAreaMarkers.set(area.id, marker);
+    }
+    marker.position.set(area.x, 0.055, area.z);
+    marker.scale.setScalar((area.radius || 3.4) / 3.4 * (1 + Math.sin(this.elapsed * 18) * 0.025));
+  }
+  spawnNetworkArrowFalls(x, z, radius) {
+    if (!this.networkArrowFalls) return;
+    for (let index = 0; index < 8 && this.networkArrowFalls.length < 64; index++) {
+      const angle = Math.random() * Math.PI * 2;
+      const distance = Math.sqrt(Math.random()) * radius;
+      this.networkArrowFalls.push({ x: x + Math.cos(angle) * distance, z: z + Math.sin(angle) * distance, angle, t: 0, duration: 0.24 });
+    }
+  }
+  updateNetworkArrowFalls(dt) {
+    const mesh = this.combat?.weaponProjectiles?.arrow;
+    if (!mesh || !this.networkArrowFalls) return;
+    let count = 0;
+    let live = 0;
+    for (const fall of this.networkArrowFalls) {
+      fall.t += dt;
+      const progress = $c(fall.t / fall.duration, 0, 1);
+      if (progress >= 1) continue;
+      if (count < mesh.instanceMatrix.count) {
+        _u.set(0.82, fall.angle, 0);
+        mu.setFromEuler(_u);
+        pu.compose(hu.set(fall.x, 5.2 * (1 - progress), fall.z), mu, gu.setScalar(0.8));
+        mesh.setMatrixAt(count++, pu);
+      }
+      this.networkArrowFalls[live++] = fall;
+    }
+    this.networkArrowFalls.length = live;
+    mesh.count = count;
+    if (count) mesh.instanceMatrix.needsUpdate = true;
+  }
   syncNetworkAreas(areas) {
     const active = new Set();
     for (const area of areas) {
       active.add(area.id);
+      if (area.kind === `arrow-shower`) {
+        this.ensureNetworkAreaMarker(area);
+        continue;
+      }
       const previous = this.networkAreaPulse.get(area.id) || -Infinity;
       if (this.elapsed - previous < 0.28) continue;
       this.networkAreaPulse.set(area.id, this.elapsed);
@@ -1035,8 +1194,18 @@ var ld = class {
       this.effects.ring(area.x, area.z, area.radius || 3, owner?.superColor || new J(0xd0a2ff), 0.38, 2.15);
     }
     for (const id of this.networkAreaPulse.keys()) if (!active.has(id)) this.networkAreaPulse.delete(id);
+    for (const [id, marker] of this.networkAreaMarkers || []) {
+      if (active.has(id)) continue;
+      this.scene.remove(marker);
+      this.networkAreaMarkers.delete(id);
+    }
   }
   clearNetworkVisuals() {
+    this.clearNetworkTrapMarkers();
+    for (const marker of this.networkAreaMarkers?.values() || []) this.scene.remove(marker);
+    this.networkAreaMarkers?.clear();
+    this.networkArrowFalls = [];
+    if (this.combat?.weaponProjectiles?.arrow) this.combat.weaponProjectiles.arrow.count = 0;
     for (const collection of [this.networkProjectiles, this.networkItems]) {
       if (!collection) continue;
       for (const mesh of collection.values()) {
@@ -1056,6 +1225,8 @@ var ld = class {
     this.networkProjectiles = null;
     this.networkItems = null;
     this.networkAreaPulse?.clear();
+    this.networkAreaMarkers = null;
+    this.networkTrapMarkers = null;
   }
   endNetworkMatch(result) {
     if (this.state !== `playing`) return;
@@ -1227,6 +1398,143 @@ var ld = class {
   shake(e, t, n) {
     let r = sl(t, n, this.focus.x, this.focus.z);
     this.shakeAmp = Math.max(this.shakeAmp, e * $c(1 - r / 8, 0, 1));
+  }
+  resetTimedTraps() {
+    this.clearTimedTraps();
+    this.nextTrapAt = 60;
+    this.nextTrapId = 1;
+    this.trapRngState = (((this.world?.seed ?? this.nextSeed ?? 0) | 0) ^ 0x52ed270b) >>> 0;
+  }
+  nextTimedTrapRandom() {
+    let value = (this.trapRngState += 0x6d2b79f5);
+    value = Math.imul(value ^ (value >>> 15), value | 1);
+    value ^= value + Math.imul(value ^ (value >>> 7), value | 61);
+    return ((value ^ (value >>> 14)) >>> 0) / 4294967296;
+  }
+  createTrapMarker() {
+    const marker = new ut();
+    const fillGeometry = new mr(1, 48).rotateX(-Math.PI / 2);
+    const ringGeometry = new br(0.9, 1, 48).rotateX(-Math.PI / 2);
+    const fillMaterial = new Tn({ color: 0xff3e4b, transparent: !0, opacity: 0.12, depthWrite: !1, side: 2 });
+    const ringMaterial = new Tn({ color: 0xff3e4b, transparent: !0, opacity: 0.78, depthWrite: !1, side: 2 });
+    const fill = new Ln(fillGeometry, fillMaterial);
+    const ring = new Ln(ringGeometry, ringMaterial);
+    fill.position.y = 0.02;
+    ring.position.y = 0.035;
+    marker.add(fill, ring);
+    marker.userData.trapParts = { fill, ring };
+    marker.userData.trapGeometry = [fillGeometry, ringGeometry];
+    marker.userData.trapMaterials = [fillMaterial, ringMaterial];
+    marker.renderOrder = 3;
+    this.scene.add(marker);
+    return marker;
+  }
+  updateTrapMarker(marker, trap) {
+    if (!marker) return;
+    const warning = trap.phase === `warning`;
+    const color = warning ? 0xff3147 : trap.kind === `burning` ? 0xff7a30 : trap.kind === `poison` ? 0x59e36c : 0xff3e4b;
+    const pulse = 0.5 + Math.sin(this.elapsed * 11) * 0.5;
+    const { fill, ring } = marker.userData.trapParts;
+    marker.position.set(trap.x, 0, trap.z);
+    marker.scale.set(trap.radius, 1, trap.radius);
+    fill.material.color.set(color);
+    ring.material.color.set(color);
+    fill.material.opacity = warning ? 0.07 + pulse * 0.1 : trap.kind === `poison` ? 0.2 : 0.25;
+    ring.material.opacity = warning ? 0.48 + pulse * 0.42 : 0.72;
+  }
+  disposeTrapMarker(marker) {
+    if (!marker) return;
+    this.scene.remove(marker);
+    disposeRendererResources([...(marker.userData.trapGeometry || []), ...(marker.userData.trapMaterials || [])]);
+  }
+  clearTimedTraps() {
+    if (!this.timedTraps) this.timedTraps = new Map();
+    for (const trap of this.timedTraps.values()) this.disposeTrapMarker(trap.marker);
+    this.timedTraps.clear();
+  }
+  clearNetworkTrapMarkers() {
+    if (!this.networkTrapMarkers) return;
+    for (const marker of this.networkTrapMarkers.values()) this.disposeTrapMarker(marker);
+    this.networkTrapMarkers.clear();
+  }
+  syncNetworkTraps(traps) {
+    if (!this.networkTrapMarkers) return;
+    const active = new Set();
+    for (const trap of traps) {
+      if (!trap?.id || !Number.isFinite(trap.x) || !Number.isFinite(trap.z)) continue;
+      active.add(trap.id);
+      let marker = this.networkTrapMarkers.get(trap.id);
+      if (!marker) {
+        marker = this.createTrapMarker();
+        this.networkTrapMarkers.set(trap.id, marker);
+      }
+      this.updateTrapMarker(marker, trap);
+    }
+    for (const [id, marker] of this.networkTrapMarkers) {
+      if (active.has(id)) continue;
+      this.disposeTrapMarker(marker);
+      this.networkTrapMarkers.delete(id);
+    }
+  }
+  updateTimedTraps(dt) {
+    if (this.networkSession || this.state !== `playing`) return;
+    if (this.matchTime >= this.nextTrapAt && this.timedTraps.size === 0) {
+      const kinds = [`explosion`, `burning`, `poison`];
+      const kind = kinds[Math.floor(this.nextTimedTrapRandom() * kinds.length)];
+      let point = null;
+      for (let attempt = 0; attempt < 160; attempt += 1) {
+        const tileX = 4 + Math.floor(this.nextTimedTrapRandom() * 36);
+        const tileZ = 4 + Math.floor(this.nextTimedTrapRandom() * 36);
+        if (!this.world.isWalkable(tileX, tileZ)) continue;
+        const x = this.world.center(tileX);
+        const z = this.world.center(tileZ);
+        if (this.world.hazardDamageAt(x, z) > 0) continue;
+        point = { x, z };
+        break;
+      }
+      point ||= { x: 0, z: 0 };
+      const id = `solo-trap-${this.nextTrapId++}`;
+      const trap = { id, kind, ...point, radius: 3.6, phase: `warning`, remaining: 5, damageT: 0, createdAt: this.matchTime };
+      trap.marker = this.createTrapMarker();
+      this.timedTraps.set(id, trap);
+      this.updateTrapMarker(trap.marker, trap);
+      this.nextTrapAt += 60;
+      this.hud.banner(`RED ZONE — MOVE!`, 1.8, !0);
+    }
+    for (const [id, trap] of this.timedTraps) {
+      if (trap.createdAt !== this.matchTime) trap.remaining = Math.max(0, trap.remaining - dt);
+      this.updateTrapMarker(trap.marker, trap);
+      if (trap.phase === `warning` && trap.remaining <= 0) {
+        if (trap.kind === `explosion`) {
+          this.effects.explosion(trap.x, trap.z, trap.radius, new J(0xff4b42), !0);
+          this.shake(0.42, trap.x, trap.z);
+          for (const brawler of this.brawlers) {
+            if (!brawler.alive) continue;
+            const distance = Math.hypot(brawler.x - trap.x, brawler.z - trap.z);
+            if (distance <= trap.radius) brawler.takeDamage(Math.round(1450 * (1 - distance / trap.radius * 0.45)), null, !0, { kind: `trap`, x: trap.x, z: trap.z });
+          }
+          this.disposeTrapMarker(trap.marker);
+          this.timedTraps.delete(id);
+          continue;
+        }
+        trap.phase = `active`;
+        trap.remaining = 8;
+        trap.damageT = 0;
+      }
+      if (trap.phase !== `active`) continue;
+      trap.damageT += dt;
+      while (trap.damageT >= 1) {
+        trap.damageT -= 1;
+        const damage = trap.kind === `burning` ? 240 : 190;
+        for (const brawler of this.brawlers) {
+          if (brawler.alive && Math.hypot(brawler.x - trap.x, brawler.z - trap.z) <= trap.radius) brawler.takeDamage(damage, null, !0, { kind: trap.kind, x: trap.x, z: trap.z });
+        }
+      }
+      if (trap.remaining <= 0) {
+        this.disposeTrapMarker(trap.marker);
+        this.timedTraps.delete(id);
+      }
+    }
   }
   clearBots() {
     for (let e of this.brawlers) {
@@ -1584,6 +1892,7 @@ var ld = class {
       for (let t of this.brawlers) t.update(e);
       this.separateBrawlers();
       this.combat.update(e);
+      this.updateTimedTraps(e);
       this.updateRespawnCountdown();
       if (this.state !== `menu` && this.modeName !== `deathmatch`) {
         let t = this.gas.active;
@@ -1652,22 +1961,20 @@ var ld = class {
   adaptQuality(e) {
     let t = this.perf;
     if (
-      this.userPickedQuality ||
       this.state !== `playing` ||
       this.paused ||
       document.hidden ||
-      e > 0.1 ||
-      ((t.t += e), t.frames++, t.t < 6)
+      ((t.t += Math.max(0, e)), t.frames++, t.t < (this.userPickedQuality ? 3 : 6))
     )
       return;
     let n = t.frames / t.t;
     ((t.t = 0), (t.frames = 0));
     let r = [`ultra`, `high`, `medium`, `low`],
       i = r.indexOf(this.pipeline.qualityName);
-    n < 24 &&
+    n < (this.userPickedQuality ? 18 : 24) &&
       i < r.length - 1 &&
       (this.setQuality(r[i + 1]),
-      this.hud.toast(`Running at ${Math.round(n)} fps - switched to ${Uc[r[i + 1]].label} quality`));
+      this.hud.toast(`Running at ${Math.round(n)} fps - switched to ${Uc[r[i + 1]].label} quality to keep the match responsive`));
   }
   recordFrameTiming(e, t, n) {
     let r = this.frameTiming,

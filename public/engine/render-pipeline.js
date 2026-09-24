@@ -85,9 +85,18 @@ var Yc = {
     }
     setQuality(e) {
       if (!Uc[e]) return;
+      let previous = this.quality;
       ((this.qualityName = e), (this.quality = Uc[e]), (this.shadowLightsDirty = !0));
       let t = +!this.usingPCSS;
-      (this.renderer.shadowMap.type !== t && (this.renderer.shadowMap.type = t), this.build());
+      this.renderer.shadowMap.type !== t && (this.renderer.shadowMap.type = t);
+      let passLayoutChanged = !previous || previous.msaa !== this.quality.msaa || previous.ao !== this.quality.ao || previous.bloom !== this.quality.bloom;
+      if (passLayoutChanged || (!this.isWebGPU && !this.composer)) this.build();
+      else {
+        let width = Math.max(2, this.renderer.domElement.clientWidth || window.innerWidth);
+        let height = Math.max(2, this.renderer.domElement.clientHeight || window.innerHeight);
+        this.setSize(width, height, this.getPixelRatio(width, height));
+        this.requestShadowUpdate(!0);
+      }
     }
     requestShadowUpdate(e = !1) {
       ((this.shadowUpdateRequested = !0), e && (this.shadowLightsDirty = !0));
@@ -130,7 +139,12 @@ var Yc = {
         (this.gtao = null),
         e.ao && this.toggles.ao)
       ) {
-        let e = new Ac(this.scene, this.camera, a.x, a.y);
+        // AO is a soft, low-frequency effect. Keeping its G-buffer at half
+        // resolution avoids three full-size render targets on High/Ultra maps.
+        let aoScale = this.quality.tier >= 2 ? 0.5 : 1;
+        let e = new Ac(this.scene, this.camera, Math.max(2, Math.ceil(a.x * aoScale)), Math.max(2, Math.ceil(a.y * aoScale)));
+        let resizeAO = e.setSize.bind(e);
+        e.setSize = (width, height) => resizeAO(Math.max(2, Math.ceil(width * aoScale)), Math.max(2, Math.ceil(height * aoScale)));
         ((e.output = Ac.OUTPUT.Default),
           (e.blendIntensity = 0.85),
           e.updateGtaoMaterial({

@@ -73,10 +73,13 @@ export function useSuper(state, playerId, payload = {}) {
   return result;
 }
 
-export function useItem(state, playerId) {
+export function useItem(state, playerId, slot = 0) {
   const player = state.players.get(playerId);
-  if (!player || !player.alive || !player.heldItem) return false;
-  const kind = player.heldItem;
+  const slotIndex = slot === 1 ? 1 : 0;
+  if (!player || !player.alive) return false;
+  player.heldItems ||= [player.heldItem || null, null];
+  const kind = player.heldItems[slotIndex] || (slotIndex === 0 ? player.heldItem : null);
+  if (!kind) return false;
   const canUse = kind === 'shield' ? player.shieldT <= 0
     : kind === 'speed' ? player.itemSpeedT <= 0
       : kind === 'heal' ? player.hp < player.maxHp
@@ -96,8 +99,9 @@ export function useItem(state, playerId) {
     }
   }
   else if (kind === 'super') player.superCharge = Math.min(1, player.superCharge + 0.25);
-  player.heldItem = null;
-  state.events.push({ type: 'ITEM_USED', ownerId: player.id, kind });
+  player.heldItems[slotIndex] = null;
+  player.heldItem = player.heldItems[0] || null;
+  state.events.push({ type: 'ITEM_USED', ownerId: player.id, kind, slot: slotIndex });
   return true;
 }
 
@@ -425,9 +429,14 @@ export function stepItems(state, dt) {
       continue;
     }
     for (const player of state.players.values()) {
-      if (!player.alive || player.heldItem || Math.hypot(player.x - item.x, player.z - item.z) > 0.85) continue;
-      player.heldItem = item.kind; item.active = false; item.respawnT = 10;
-      state.events.push({ type: 'ITEM_PICKUP', itemId: item.id, ownerId: player.id, kind: item.kind });
+      if (!player.alive || Math.hypot(player.x - item.x, player.z - item.z) > 0.85) continue;
+      player.heldItems ||= [player.heldItem || null, null];
+      const slot = player.heldItems.findIndex((held) => !held);
+      if (slot < 0) continue;
+      player.heldItems[slot] = item.kind;
+      player.heldItem = player.heldItems[0] || null;
+      item.active = false; item.respawnT = 10;
+      state.events.push({ type: 'ITEM_PICKUP', itemId: item.id, ownerId: player.id, kind: item.kind, slot });
       break;
     }
   }

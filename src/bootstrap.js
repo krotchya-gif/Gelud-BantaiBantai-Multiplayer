@@ -1,5 +1,6 @@
 import './pwa.js';
 import './multiplayer/lobby.js';
+import { chooseRenderer } from './renderer-selection.js';
 
 const legacyScripts = [
   'engine/three-legacy.js',
@@ -30,12 +31,12 @@ function loadClassicScript(path) {
 async function prepareRenderer() {
   const canvas = document.getElementById('game');
   const requested = new URLSearchParams(location.search).get('renderer');
+  const isMobile = navigator.userAgentData?.mobile ?? /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+  const rendererKind = chooseRenderer({ requested, isMobile, webgpuAvailable: !!navigator.gpu });
 
-  // The current WebGPU path repeatedly destroys its shadow depth texture while
-  // submitting frames on supported desktop drivers. Keep WebGL2 as the stable
-  // default until that renderer lifecycle is verified; retain an explicit opt-in
-  // for diagnosis with ?renderer=webgpu.
-  if (requested !== 'webgpu' || !navigator.gpu) {
+  // Prefer WebGPU on phones for the direct render path; WebGL2 remains the
+  // desktop default while the shadow-depth texture lifecycle is investigated.
+  if (rendererKind !== 'webgpu') {
     window.__GBH_RENDERER__ = { kind: 'webgl', renderer: null };
     return;
   }

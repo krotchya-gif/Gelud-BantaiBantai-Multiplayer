@@ -363,7 +363,7 @@ var  Ru = 9,
   Uu = (e) => e.code || Hu[(e.key || ``).toLowerCase()] || ``,
   Wu = () => ({ id: null, ox: 0, oy: 0, x: 0, y: 0, mag: 0, moved: !1 }),
   Gu = class {
-    constructor(e, t) {
+    constructor(e, t, aControl) {
       ((this.keys = new Set()),
         (this.ndcX = 0),
         (this.ndcY = 0),
@@ -378,7 +378,8 @@ var  Ru = 9,
         (this.onTouchMode = null),
         (this.lastTouch = -1e9),
         (this.sticks = { move: Wu(), aim: Wu(), super: Wu() }),
-        (this.shots = []));
+        (this.shots = []),
+        (this.attackControl = aControl || null));
       let n = new Set([`Space`, `KeyE`]);
       (window.addEventListener(`keydown`, (e) => {
         if (e.repeat || (e.target && (e.target.tagName === `INPUT` || e.target.tagName === `SELECT`))) return;
@@ -444,6 +445,7 @@ var  Ru = 9,
         },
         o = (e) => Object.values(this.sticks).find((t) => t.id === e.pointerId);
       (e.addEventListener(`pointerdown`, (e) => a(e, `field`)),
+        aControl && aControl.addEventListener(`pointerdown`, (e) => a(e, `field`)),
         t &&
           (t.addEventListener(`pointerdown`, (e) => a(e, `super`)),
           t.addEventListener(`click`, () => {
@@ -590,12 +592,24 @@ var  Ru = 9,
       ((this.touch = e), document.body.classList.toggle(`touch`, e), (this.lastSuper = -1), (this.lastItemUi = []), (this.lastFlickerUi = ``));
     }
     updateSticks() {
-      if (!this.touch) return;
+      if (!this.touch) {
+        document.body.classList.remove(`aiming`);
+        return;
+      }
       let e = this.game.input.sticks,
         t = window.innerWidth,
         n = window.innerHeight,
-        r = { move: [Math.max(96, t * 0.14), n - 118], aim: [t - Math.max(104, t * 0.13), n - 128] };
-      this.game.leftHanded && ([r.move, r.aim] = [r.aim, r.move]);
+        attackBounds = this.attackControl?.getBoundingClientRect(),
+        attackCenter = attackBounds
+          ? [attackBounds.left + attackBounds.width / 2, attackBounds.top + attackBounds.height / 2]
+          : [this.game.leftHanded ? 80 : t - 80, n - 80],
+        r = {
+          move: this.game.leftHanded
+            ? [t - Math.max(96, t * 0.14), n - 118]
+            : [Math.max(96, t * 0.14), n - 118],
+          aim: attackCenter,
+        };
+      document.body.classList.toggle(`aiming`, e.aim.id !== null);
       for (let t of [`move`, `aim`]) {
         let n = e[t],
           i = this.stickEls[t];

@@ -115,7 +115,7 @@ npm test -- --run tests/server tests/shared
 npm test -- --run
 ```
 
-Verifikasi update kontrol, trap, dan grafis: `npm run build`, `npm run test:characters`, `npm test -- --run` (22 file, 82 test), pemeriksaan sintaks 21 file JavaScript/MJS yang berubah, dan `git diff --check` lulus. Test karakter juga memeriksa roster Deathmatch maksimal dua bot per karakter pada 65 seed, perilaku solo untuk item/cooldown Flicker/trap berkala, penurunan kualitas otomatis saat Ultra manual berjalan 5 FPS, pencegahan trap lokal palsu di multiplayer, animasi dan efek super multiplayer, serta penggunaan ulang dan pembersihan aset visual jaringan. Hasil build terbaru berukuran 3,01 MB untuk `dist/` (3.012.412 byte), dengan bundle WebGPU 781,37 kB (212,55 kB gzip) dan bundle aplikasi 31,00 kB (10,94 kB gzip). Freeze yang terjadi sesekali pada GPU dan map tertentu masih perlu diuji di perangkat yang mengalami masalah; test otomatis tidak dapat membuktikan masalah tersebut hilang sepenuhnya.
+Verifikasi update kontrol, trap, dan grafis: `npm run build`, `npm run test:characters`, `npm test -- --run` (23 file, 92 test), pemeriksaan sintaks engine, dan `git diff --check` lulus. Test karakter memeriksa roster Deathmatch maksimal dua bot per karakter pada 65 seed, perilaku solo untuk item/cooldown Flicker/trap berkala, penurunan kualitas otomatis saat Ultra manual berjalan 5 FPS, pencegahan trap lokal palsu di multiplayer, animasi dan efek super multiplayer, serta penggunaan ulang dan pembersihan aset visual jaringan. Build terbaru berukuran 3.015.523 byte untuk `dist/`, dengan bundle WebGPU 781,37 kB (212,55 kB gzip) dan bundle aplikasi 31,25 kB (11,04 kB gzip). Freeze yang sesekali muncul pada GPU dan map tertentu masih perlu diuji langsung di perangkat yang mengalaminya; test otomatis tidak membuktikan masalah tersebut hilang sepenuhnya.
 
 Benchmark sintetis delapan pemain yang tercatat sebelumnya adalah baseline sebelum snapshot trap berkala: snapshot 15 Hz, trafik sekitar 62,5 KB/detik/client saat diam dan 169,2 KB/detik/client saat semua pemain menembak, dengan p95 simulasi plus satu serialisasi snapshot sekitar 0,29 ms. Trafik multiplayer setelah penambahan snapshot trap belum diukur ulang.
 
@@ -123,7 +123,7 @@ Pekerjaan operasional yang masih memerlukan lingkungan deployment adalah mengisi
 
 ## Renderer
 
-`src/bootstrap.js` memakai WebGL2 sebagai renderer default, kemudian memuat engine gameplay klasik secara berurutan. WebGPU tetap tersedia sebagai jalur eksperimental melalui `?renderer=webgpu`. Pada sesi verifikasi lokal, WebGPU berulang kali melaporkan `ShadowDepthTexture` yang sudah dihancurkan saat frame dikirim, jadi jalur itu tidak dipilih otomatis. WebGL2 berjalan tanpa error renderer pada sesi tersebut.
+`src/bootstrap.js` memuat engine gameplay klasik secara berurutan. Perangkat mobile memilih WebGPU otomatis bila tersedia agar memakai jalur render langsung; perangkat lain memakai WebGL2 secara default. WebGL2 tetap dapat dipaksa dengan `?renderer=webgl`, dan WebGPU dapat dipaksa dengan `?renderer=webgpu`. Pada sesi verifikasi lokal sebelumnya, jalur WebGPU desktop berulang kali melaporkan `ShadowDepthTexture` yang sudah dihancurkan saat frame dikirim, sehingga desktop tetap memakai WebGL2 sampai masalah lifecycle shadow tersebut selesai diperiksa.
 
 ```text
 http://localhost:5173/?renderer=webgpu
@@ -233,7 +233,7 @@ P / Escape    pause atau lanjut
 M             mute
 ```
 
-Mobile memakai joystick gerak kiri dan joystick aim kanan. Cluster gameplay kanan bawah mengikuti pola referensi: tombol serangan utama dengan tiga posisi skill melengkung di sekitarnya; **SUPER** berada di posisi paling bawah dari tiga posisi skill. Baris utility di bawahnya berurutan **Item 1**, **Item 2**, **Flicker**, menggantikan tombol Recall/Regen/Execute pada referensi. Slot item menampilkan item yang dipegang masing-masing; cooldown Flicker menampilkan detik tersisa lalu state siap. Layout yang sama menjadi default untuk skill atau item tambahan. Hanya cluster kontrol gameplay bawah yang mengikuti pola ini; HUD lainnya tetap terpisah. Event touch item dan Flicker diproses terpisah sehingga menekan tombol dengan jari kedua tidak mereset gerakan, bidikan, atau joystick yang sedang aktif. Mode left-handed memindahkan cluster aksi ke sisi lain.
+Mobile memakai joystick gerak kiri dan joystick aim kanan; drag lalu lepas untuk menembak, atau tap untuk auto-aim. Cluster kanan bawah menyediakan tiga posisi skill melengkung dengan **SUPER** di posisi paling bawah, tanpa tombol serangan duplikat. Baris utility berurutan **Item 1**, **Item 2**, **Flicker**, menggantikan tombol Recall/Regen/Execute pada referensi. Slot item menampilkan item yang dipegang masing-masing; cooldown Flicker menampilkan detik tersisa lalu state siap. Layout yang sama menjadi default untuk skill atau item tambahan. Hanya cluster kontrol gameplay bawah yang mengikuti pola ini; HUD lainnya tetap terpisah. Event touch item dan Flicker diproses terpisah sehingga menekan tombol dengan jari kedua tidak mereset gerakan, bidikan, atau joystick yang sedang aktif. Mode left-handed memindahkan cluster aksi ke sisi lain.
 
 ## Parameter debug URL
 
@@ -241,6 +241,7 @@ Parameter yang dibaca engine:
 
 ```text
 ?renderer=webgl
+?renderer=webgpu
 ?q=low|medium|high|ultra
 ?bots=auto|easy|normal|hard|brutal
 ?mode=classic|blitz|deathmatch
@@ -253,6 +254,8 @@ Parameter yang dibaca engine:
 ?ss=0..3
 ```
 
+Perangkat tanpa WebGPU selalu kembali ke WebGL2. Memilih kualitas di mobile tidak lagi menyalakan AO dan Bloom secara otomatis; keduanya tetap tersedia lewat pengaturan.
+
 Contoh:
 
 ```text
@@ -263,7 +266,8 @@ http://localhost:5173/?renderer=webgl&mode=deathmatch&map=open&auto=ello&seed=42
 
 ```sh
 npm test -- --run
+npm run test:characters
 npm run build
 ```
 
-Build menulis output ke `dist/`. Ukuran bundle vendor WebGPU Three.js dapat memunculkan peringatan ukuran chunk dari Vite; ini tidak menghentikan build.
+Build menulis output ke `dist/`. Ukuran bundle vendor WebGPU Three.js dapat memunculkan peringatan ukuran chunk dari Vite; ini tidak menghentikan build. Verifikasi lokal 24 September 2026: 23 file test dan 92 test lulus; pemeriksaan rig karakter lulus; build menghasilkan 22 file berukuran total 3.015.523 byte. Browser desktop berjalan 60 FPS tanpa error console. Layout mobile diperiksa pada viewport 1280 × 540: Attack 112 px dan Super/Skill 1/Skill 2 masing-masing 68 px, mengikuti posisi arc referensi. Pengguna melaporkan Redmi 12C kini berjalan di atas 40 FPS; pengukuran ulang Poco F6 dan uji sentuh langsung untuk tombol baru masih menunggu.

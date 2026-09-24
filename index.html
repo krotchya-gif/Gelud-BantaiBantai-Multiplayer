@@ -43,15 +43,18 @@
         <div class="stick" id="stick-aim"><i></i><b>DRAG TO AIM &middot; TAP TO AUTO-AIM</b></div>
       </div>
       <div id="action-cluster">
-        <div id="skill-arc" aria-label="Skill buttons">
-          <span class="skill-reserved skill-reserved-one" aria-hidden="true"></span>
-          <span class="skill-reserved skill-reserved-two" aria-hidden="true"></span>
-          <div id="super"><div class="core" id="super-core">SUPER</div></div>
-        </div>
-        <button id="attack-action" type="button" aria-label="Basic attack">
-          <span class="attack-icon" aria-hidden="true">⚔</span>
+        <span id="aim-hint">DRAG TO AIM &middot; TAP TO AUTO-AIM</span>
+        <button id="attack-control" type="button" aria-label="Attack: drag to aim, tap to auto-aim">
+          <svg viewBox="0 0 48 48" fill="none" aria-hidden="true">
+            <path d="m10 8 17 17M38 8 21 25M8 10l6-3 5 5-3 6M40 10l-6-3-5 5 3 6M20 26l-6 6m10-3 6 6M12 38l4-4m16 4-4-4" stroke="currentColor" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round" />
+          </svg>
           <span class="attack-label">ATTACK</span>
         </button>
+        <div id="skill-arc" aria-label="Skill buttons">
+          <span class="skill-reserved skill-reserved-one" aria-hidden="true"><i>✦</i><b>SKILL 1</b></span>
+          <span class="skill-reserved skill-reserved-two" aria-hidden="true"><i>✧</i><b>SKILL 2</b></span>
+          <div id="super"><div class="core" id="super-core">SUPER</div></div>
+        </div>
         <div id="utility-actions" aria-label="Items and dodge">
           <button id="item-action" type="button" disabled aria-label="Item 1 empty" title="Item 1 empty">
             <span class="item-icon" id="item-icon" aria-hidden="true">◇</span>

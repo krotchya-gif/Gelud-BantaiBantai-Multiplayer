@@ -71,7 +71,7 @@ var ld = class {
       this.pipeline.requestShadowUpdate(!0),
       (this.audio = new Xu()),
       (this.audio.muted = !!t.muted),
-      (this.input = new Gu(this.pipeline.renderer.domElement, document.getElementById(`super`))),
+      (this.input = new Gu(this.pipeline.renderer.domElement, document.getElementById(`super`), document.getElementById(`attack-control`))),
       (this.input.onTouchMode = (e) => this.hud.setTouchMode(e)),
       (this.elapsed = 0),
       (this.matchTime = 0),
@@ -167,28 +167,6 @@ var ld = class {
         }
       })(),
       (() => {
-        let button = $(`attack-action`), touchActivationAt = 0, touchPointerId = null;
-        const queueAttack = () => this.input.shots.push({ kind: `attack`, x: 0, y: 0, mag: 0, tap: !0, held: 0, cancelled: !1 });
-        button.addEventListener(`pointerdown`, (event) => {
-          if (event.pointerType !== `touch`) return;
-          event.preventDefault(); event.stopPropagation();
-          touchPointerId = event.pointerId; touchActivationAt = performance.now(); queueAttack();
-        });
-        window.addEventListener(`pointerup`, (event) => {
-          if (event.pointerId !== touchPointerId) return;
-          touchPointerId = null; touchActivationAt = performance.now();
-        });
-        window.addEventListener(`pointercancel`, (event) => {
-          if (event.pointerId !== touchPointerId) return;
-          touchPointerId = null; touchActivationAt = 0;
-        });
-        button.addEventListener(`click`, (event) => {
-          let generatedByTouch = event.pointerType === `touch` || (!event.pointerType && touchActivationAt > 0 && event.detail > 0 && performance.now() - touchActivationAt < 800);
-          if (generatedByTouch) { touchActivationAt = 0; event.preventDefault(); event.stopPropagation(); return; }
-          queueAttack();
-        });
-      })(),
-      (() => {
         let button = $(`flicker-action`),
           touchActivationAt = 0,
           touchPointerId = null;
@@ -252,10 +230,7 @@ var ld = class {
   setQuality(e, t = !1) {
     (t &&
       ((this.userPickedQuality = !0),
-      (this.mobileDefaultQuality = !1),
-      [`ao`, `bloom`].forEach((e) => {
-        this.mobileDefaultEffects[e] && ((this.pipeline.toggles[e] = !0), (this.mobileDefaultEffects[e] = !1));
-      })),
+      (this.mobileDefaultQuality = !1)),
       this.pipeline.setQuality(e),
       this.perf && ((this.perf.t = 0), (this.perf.frames = 0)),
       this.effects?.setQuality(this.pipeline.quality.tier),

@@ -63,6 +63,7 @@ function mergeBrawlerPivot(e, t, n) {
   return i;
 }
 function uu(e, t) {
+  if (e.visual === 'sorcerer') return buildSorcererBrawler(e, t);
   if (e.visual) return buildReferenceBrawler(e, t);
   let n = e.palette,
     r = {
@@ -339,13 +340,28 @@ var FLICKER_COOLDOWN = 30,
         this.root.add(this.superRing),
         (this.maxHp = t.hp),
         (this.hp = t.hp),
-        (this.maxAmmo = t.maxAmmo || 3),
+        (this.maxAmmo = Number.isFinite(t.maxAmmo) ? t.maxAmmo : 3),
         (this.ammo = this.maxAmmo),
         (this.reloadT = 0),
         (this.flickerReadyAt = FLICKER_COOLDOWN),
         (this.flickerInvulnT = 0),
         (this.flicker = null),
         (this.superCharge = 0),
+        (this.skillCooldowns = [0, 0]),
+        (this.skill2Charge = null),
+        (this.skill2Charging = !1),
+        (this.skill2ChargeT = 0),
+        (this.skillAnimation = null),
+        (this.gojoBarrier = !1),
+        (this.gojoBarrierReadyAt = e.matchTime + 10),
+        (this.hardCCT = 0),
+        (this.hardCCRecoveryT = 0),
+        (this.slowEffects = new Map()),
+        (this.bleeds = new Map()),
+        (this.burns = new Map()),
+        (this.sukunaBasicHits = new Map()),
+        (this.sukunaRushT = 0),
+        (this.sukunaPassiveReadyAt = 0),
         (this.comboStep = 0),
         (this.comboResetT = 0),
         (this.meleeLunge = null),
@@ -421,7 +437,7 @@ var FLICKER_COOLDOWN = 30,
       return this.flickerRemaining <= 0;
     }
     get usesAmmo() {
-      return this.def.id !== `ello` && this.def.id !== `syafiah`;
+      return this.def.id !== `ello` && this.def.id !== `syafiah` && this.def.id !== `gojo`;
     }
     get knockbackImmune() {
       return this.def.id === `ello` && (
@@ -444,7 +460,7 @@ var FLICKER_COOLDOWN = 30,
         : this.knock.set(x, z);
     }
     get airborne() {
-      return this.leap !== null;
+      return !!this.leap || (this.networkLeapT || 0) > 0;
     }
     muzzleWorld(e) {
       let t = this.model.muzzles,
@@ -454,7 +470,7 @@ var FLICKER_COOLDOWN = 30,
       return (e.set(this.x + n.x * r + n.z * i, n.y, this.z - n.x * i + n.z * r), e);
     }
     canAct() {
-      return this.alive && !this.leap && !this.dash && !this.flicker && this.game.state !== `countdown`;
+      return this.alive && this.hardCCT <= 0 && !this.skill2Charge && !this.airborne && !this.dash && !this.flicker && this.game.state !== `countdown`;
     }
     useFlicker(e, t) {
       if (!this.canAct() || this.spawnT > 0 || this.burst || this.game.state !== `playing` || !this.flickerReady) return !1;
@@ -521,6 +537,13 @@ var FLICKER_COOLDOWN = 30,
           remaining: step.lunge,
           speed: step.lunge / this.def.attack.lungeDuration,
         };
+      } else if (this.def.id === `gojo`) {
+        let comboIndex = this.comboStep,
+          step = this.def.attack.combo[comboIndex] || this.def.attack.combo[0];
+        attack = { ...attack, damage: step.damage, pull: step.pull || 0, push: step.push || 0 };
+        recovery = step.recovery;
+        this.comboStep = (this.comboStep + 1) % this.def.attack.combo.length;
+        this.comboResetT = this.def.attack.comboReset;
       } else if (this.def.id === `ace` && this.stationaryT >= 0.45) {
         attack = { ...attack, damage: Math.round(attack.damage * 1.1) };
         this.stationaryT = 0;
@@ -530,6 +553,72 @@ var FLICKER_COOLDOWN = 30,
       this.isCharging = !1;
       this.chargeLevel = 0;
       return !0;
+    }
+    startSkillAnimation(skill, duration = 0.52, charging = false) {
+      this.skillAnimation = { skill, t: 0, duration, charging };
+      this.recoil = Math.max(this.recoil || 0, 0.78);
+    }
+    useSkill(skill, phase = `activate`, dx, dz, targetX, targetZ) {
+      let index = skill === 2 ? 1 : skill === 1 ? 0 : -1,
+        definition = this.def.skills?.[index],
+        chargedRelease = this.def.id === `sukuna` && skill === 2 && (phase === `release` || phase === `cancel`);
+      if (index < 0 || !definition || !this.alive || (!chargedRelease && !this.canAct()) || this.spawnT > 0 || this.burst) return !1;
+      this.skillCooldowns ||= [0, 0];
+      let length = Math.hypot(dx || 0, dz || 0);
+      if (length < 1e-8) { dx = Math.sin(this.facing); dz = Math.cos(this.facing); length = 1; }
+      dx /= length; dz /= length;
+      this.facing = this.aimAngle = Math.atan2(dx, dz);
+      this.root.rotation.y = this.facing;
+      if (this.def.id === `sukuna` && skill === 2) {
+        if (phase === `start`) {
+          if (this.skill2Charge || this.skillCooldowns[index] > 0) return !1;
+          this.skillCooldowns[index] = definition.cooldown;
+          this.skill2Charge = { startedAt: this.game.matchTime, dx, dz };
+          this.skill2Charging = !0;
+          this.skill2ChargeT = 0;
+          this.startSkillAnimation(2, definition.chargeTime, !0);
+          this.isCharging = !0;
+          this.chargeLevel = 0;
+          this.lastCombat = this.game.elapsed;
+          this.game.effects.impact(this.x + dx * 0.55, 0.85, this.z + dz * 0.55, this.superColor, 8);
+          return !0;
+        }
+        if (phase === `cancel`) {
+          if (!this.skill2Charge) return !1;
+          this.skill2Charge = null; this.isCharging = !1; this.chargeLevel = 0;
+          this.skill2Charging = !1; this.skill2ChargeT = 0; this.skillAnimation = null;
+          return !0;
+        }
+        if (phase !== `release` || !this.skill2Charge) return !1;
+        if (this.hardCCT > 0) { this.skill2Charge = null; this.isCharging = !1; this.chargeLevel = 0; this.skill2Charging = !1; this.skill2ChargeT = 0; this.skillAnimation = null; return !1; }
+        let held = Math.max(0, this.game.matchTime - this.skill2Charge.startedAt),
+          charged = held >= definition.chargeTime;
+        this.skill2Charge = null; this.isCharging = !1; this.chargeLevel = 0;
+        this.skill2Charging = !1; this.skill2ChargeT = 0;
+        this.startSkillAnimation(2, 0.48);
+        this.game.combat.spawnSukunaFlame(this, dx, dz,
+          charged ? definition.chargedDamage : definition.tapDamage,
+          charged ? definition.chargedRange : definition.tapRange,
+          charged ? definition : null);
+        return !0;
+      }
+      if (phase !== `activate` || this.skillCooldowns[index] > 0) return !1;
+      this.skillCooldowns[index] = definition.cooldown;
+      this.lastCombat = this.game.elapsed;
+      this.startSkillAnimation(skill);
+      if (this.def.id === `gojo` && skill === 1) {
+        this.game.combat.startCharacterArea(this, `gojo-pull`, targetX, targetZ, definition);
+        return !0;
+      }
+      if (this.def.id === `gojo` && skill === 2) {
+        this.game.combat.gojoRepulse(this, dx, dz, definition);
+        return !0;
+      }
+      if (this.def.id === `sukuna` && skill === 1) {
+        this.game.combat.sukunaLongSlash(this, dx, dz, definition);
+        return !0;
+      }
+      return !1;
     }
     useSuper(e, t, n, r) {
       if (!this.canAct() || !this.superReady || this.burst) return !1;
@@ -562,6 +651,11 @@ var FLICKER_COOLDOWN = 30,
         (this.root.rotation.y = this.facing);
         this.aimHold = 0.55;
         this.game.combat.startArrowShower(this, n, r, attack);
+      } else if (attack.kind === `gojo-domain` || attack.kind === `sukuna-zone`) {
+        let length = Math.hypot(e, t) || 1;
+        ((e /= length), (t /= length), (this.aimAngle = Math.atan2(e, t)), (this.facing = this.aimAngle),
+          (this.root.rotation.y = this.facing), (this.aimHold = attack.warningDelay + 0.25),
+          this.game.combat.startCharacterArea(this, attack.kind, n, r, attack, !0));
       } else if (attack.kind === `parry`) {
         let length = Math.hypot(e, t) || 1;
         ((e /= length),
@@ -652,6 +746,7 @@ var FLICKER_COOLDOWN = 30,
         (this.game.combat.slash(this, e.dirX, e.dirZ, t, e.isSuper),
           (this.punch[this.muzzleIndex % 2] = 1),
           this.game.audio.play(e.isSuper ? `shotBig` : `punch`, this.x, this.z));
+        if (this.def.id === `sukuna` && !e.isSuper) this.startSkillAnimation(0, 0.34);
         return;
       }
       let n = this.muzzleWorld(new H()),
@@ -677,6 +772,16 @@ var FLICKER_COOLDOWN = 30,
     }
     onAttackHit(target, projectile, damage) {
       if (damage <= 0) return;
+      if (this.def.id === `sukuna` && projectile.a?.sukunaBasic) {
+        let previous = this.sukunaBasicHits.get(target),
+          count = previous && this.game.matchTime - previous.lastAt <= 1.5 ? previous.count + 1 : 1;
+        this.sukunaBasicHits.set(target, { count, lastAt: this.game.matchTime });
+        if (count >= 3) {
+          this.sukunaBasicHits.set(target, { count: 0, lastAt: this.game.matchTime });
+          target.applyStatusDoT(`bleed`, this, 80, 3);
+          this.game.effects.impact(target.x, 0.9, target.z, new J(0xe52d45), 8);
+        }
+      }
       if (this.def.id === `dusty` && projectile.a.kind === `spread`) {
         let key = projectile.attackId + `:` + target.id,
           count = (this.scatterHits.get(key) || 0) + 1;
@@ -696,6 +801,33 @@ var FLICKER_COOLDOWN = 30,
       if (this.def.id === `naka` && projectile.returning) this.speedBoostT = 1.5;
       if (this.def.id === `ello` && projectile.melee && projectile.travel >= projectile.range * 0.5) this.addCharge(90);
     }
+    applyStatusDoT(kind, source, damage, duration) {
+      let collection = kind === `burn` ? this.burns : this.bleeds,
+        key = source?.id ?? `environment`;
+      collection.set(key, { source, damage, remaining: duration, nextT: 1, ticksRemaining: Math.ceil(duration) });
+      if (kind === `burn`) this.burnT = Math.max(this.burnT || 0, duration);
+    }
+    applyHardCC(duration, kind = `stun`, source = null) {
+      if (this.def.id === `gojo` && this.gojoBarrier && source && source !== this) {
+        this.gojoBarrier = !1;
+        this.gojoBarrierReadyAt = this.game.matchTime + 10;
+        this.lastDamageBlocked = !0;
+        this.game.hud.floatText(this.x, 1.7, this.z, `BARRIER`, `power`);
+        this.game.effects.impact(this.x, 0.82, this.z, new J(0x4f79ff), 12);
+        this.game.audio.play(`zap`, this.x, this.z);
+        return !1;
+      }
+      let base = $c(duration, 0, 1.5),
+        adjusted = this.hardCCRecoveryT > 0 ? base * 0.65 : base;
+      this.hardCCT = Math.max(this.hardCCT, adjusted);
+      this.hardCCRecoveryT = this.hardCCT + 2;
+      this.knock.set(0, 0);
+      this.skill2Charge = null;
+      this.isCharging = !1;
+      this.chargeLevel = 0;
+      this.game.effects.impact(this.x, 0.75, this.z, kind === `freeze` ? new J(0x70bdff) : this.lightColor, 10);
+      return !0;
+    }
     addCharge(e, rate = 0.75) {
       if (!this.alive) return;
       let t = this.superReady;
@@ -703,6 +835,7 @@ var FLICKER_COOLDOWN = 30,
         !t && this.superReady && this.isPlayer && this.game.audio.play(`ready`));
     }
     takeDamage(e, t, n = !1, context = null) {
+      this.lastDamageBlocked = !1;
       if (!this.alive || this.airborne || this.spawnT > 0 || this.flickerInvulnT > 0) return 0;
       if (this.def.id === `ello` && this.parryT > 0 && t && context?.kind === `projectile`) {
         let faceX = Math.sin(this.facing),
@@ -726,6 +859,17 @@ var FLICKER_COOLDOWN = 30,
             ...this.def.super, kind: `melee`, damage: this.def.super.counterDamage,
           }, !0);
           this.game.effects.impact(this.x + faceX * 0.7, 0.72, this.z + faceZ * 0.7, this.superColor, 12);
+          this.game.audio.play(`zap`, this.x, this.z);
+          return 0;
+        }
+      }
+      if (this.def.id === `gojo`) {
+        this.gojoBarrierReadyAt = this.game.matchTime + 10;
+        if (this.gojoBarrier && t && t !== this) {
+          this.gojoBarrier = !1;
+          this.lastDamageBlocked = !0;
+          this.game.hud.floatText(this.x, 1.7, this.z, `BARRIER`, `power`);
+          this.game.effects.impact(this.x, 0.82, this.z, new J(0x4f79ff), 12);
           this.game.audio.play(`zap`, this.x, this.z);
           return 0;
         }
@@ -786,8 +930,7 @@ var FLICKER_COOLDOWN = 30,
     useHeldItem(slot = 0) {
       slot = slot === 1 ? 1 : 0;
       if (!this.canUseHeldItem(slot)) return !1;
-      let item = this.getHeldItem(slot),
-        names = { shield: `Shield`, speed: `Speed boost`, heal: `Medkit`, ammo: this.usesAmmo ? `Ammo refill` : `Focus`, super: `Super charger` };
+      let item = this.getHeldItem(slot);
       this.heldItems[slot] = null;
       this.heldItem = this.heldItems[0] || null;
       switch (item) {
@@ -810,8 +953,7 @@ var FLICKER_COOLDOWN = 30,
       }
       ((this.squash = -1),
         this.game.effects.burst(this.x, 0.7, this.z, this.superColor, 10, 3),
-        this.game.audio.play(`pickup`, this.x, this.z),
-        this.isPlayer && this.game.hud.toast(`${names[item]} used`));
+        this.game.audio.play(`pickup`, this.x, this.z));
       return !0;
     }
     updateBotItem() {
@@ -859,15 +1001,37 @@ var FLICKER_COOLDOWN = 30,
          (this.isCharging = !1),
          (this.chargeLevel = 0),
          (this.iaidoState = null),
+         (this.skill2Charge = null),
+         (this.hardCCT = 0),
+         (this.bleeds.clear()),
+         (this.burns.clear()),
+         (this.slowEffects.clear()),
+         (this.gojoBarrier = !1),
+         (this.gojoBarrierReadyAt = this.game.matchTime + 10),
+         (this.hardCCRecoveryT = 0),
          (this.meleeLunge = null),
          (this.comboStep = 0),
          (this.comboResetT = 0),
         e && e !== this && e.kills++,
+        e && e !== this && e.def.id === `sukuna` && this.game.matchTime >= (e.sukunaPassiveReadyAt || 0) &&
+          ((e.sukunaPassiveReadyAt = this.game.matchTime + 4),
+          (e.sukunaRushT = 2), e.heal(Math.round(e.maxHp * 0.15)),
+          this.game.effects.burst(e.x, 0.8, e.z, new J(0xe52d45), 9, 2.8),
+          this.game.hud.floatText(e.x, 1.8, e.z, `COMBAT DRIVE`, `power`)),
         this.game.onBrawlerDown(this, e));
     }
     update(e) {
       let t = this.game,
         n = this.model;
+      this.skillCooldowns = (this.skillCooldowns || [0, 0]).map((remaining) => Math.max(0, remaining - e));
+      this.sukunaRushT = Math.max(0, (this.sukunaRushT || 0) - e);
+      this.hardCCT = Math.max(0, (this.hardCCT || 0) - e);
+      this.hardCCRecoveryT = Math.max(0, (this.hardCCRecoveryT || 0) - e);
+      for (let [source, slow] of this.slowEffects) {
+        slow.remaining = Math.max(0, slow.remaining - e);
+        if (slow.remaining <= 0) this.slowEffects.delete(source);
+      }
+      this.stepDamageOverTime(e);
       if (!this.alive) {
         this.deadT += e;
         if (t.modeName === `deathmatch` && t.state === `playing` && this.deadT >= t.mode.respawnDelay) {
@@ -886,6 +1050,8 @@ var FLICKER_COOLDOWN = 30,
         (this.speedBoostT = Math.max(0, this.speedBoostT - e)),
         (this.itemSpeedT = Math.max(0, this.itemSpeedT - e)),
         (this.shieldT = Math.max(0, this.shieldT - e)),
+        this.def.id === `gojo` && !this.gojoBarrier && t.matchTime >= this.gojoBarrierReadyAt &&
+          ((this.gojoBarrier = !0), t.hud.floatText(this.x, 1.8, this.z, `BARRIER`, `power`), t.effects.impact(this.x, 0.72, this.z, new J(0x4f79ff), 10)),
         this.game.state === `playing` && this.updateBotItem(),
         this.game.state === `playing` &&
         Math.hypot(this.moveX, this.moveZ) < 0.08 &&
@@ -995,15 +1161,16 @@ var FLICKER_COOLDOWN = 30,
         let world = t.world,
           gameplay = world.biomeGameplay,
           surface = world.surfaceAt(r.x, r.z),
-          n = this.def.speed * (gameplay?.moveMultiplier ?? 1);
+          n = this.def.speed * (gameplay?.moveMultiplier ?? 1),
+          slowFactor = Math.min(this.slowT > 0 ? 0.85 : 1, ...(this.slowEffects.size ? [...this.slowEffects.values()].map((effect) => effect.multiplier) : [1]));
         (this.def.terrainAffinity?.type === `bush` &&
           world.isBushAt(r.x, r.z) &&
           (n *= this.def.terrainAffinity.moveMultiplier),
-          this.itemSpeedT > 0 && (n *= 1.35),
-          this.speedBoostT > 0 && (n *= 1.15),
-          this.slowT > 0 && (n *= 0.85),
+          (n *= Math.min(1.4, (this.itemSpeedT > 0 ? 1.35 : 1) * (this.speedBoostT > 0 ? 1.15 : 1) * (this.sukunaRushT > 0 ? 1.1 : 1))),
+          (n *= slowFactor),
           this.isCharging && this.def.id === `syafiah` && (n *= 0.88),
           this.burst && this.burst.a.kind !== `melee` && (n *= 0.82),
+          this.hardCCT > 0 && (n = 0, this.knock.set(0, 0)),
           t.state === `countdown` && (n = 0),
           surface === BIOME_SURFACE.MUD && (n *= gameplay?.mudMoveMultiplier ?? 1));
         if (surface === BIOME_SURFACE.ICE) {
@@ -1043,6 +1210,22 @@ var FLICKER_COOLDOWN = 30,
           this.hp < this.maxHp &&
           ((this.regenT += e), this.regenT >= 1 && ((this.regenT = 0), this.heal(Math.round(this.maxHp * 0.13)))),
         this.animate(e, i));
+    }
+    stepDamageOverTime(dt) {
+      if (!this.alive) return;
+      for (let collection of [this.bleeds, this.burns]) {
+        for (let [sourceId, effect] of collection) {
+          effect.remaining -= dt;
+          effect.nextT -= dt;
+          while (effect.nextT <= 0 && effect.ticksRemaining > 0 && this.alive) {
+            effect.nextT += 1;
+            effect.ticksRemaining -= 1;
+            this.takeDamage(effect.damage, effect.source, !0, { kind: collection === this.bleeds ? `bleed` : `burn` });
+          }
+          if (effect.remaining <= 0 || effect.ticksRemaining <= 0) collection.delete(sourceId);
+        }
+      }
+      for (let [target, hit] of this.sukunaBasicHits) if (this.game.matchTime - hit.lastAt > 1.5) this.sukunaBasicHits.delete(target);
     }
     animate(e, t) {
       let n = this.model,
@@ -1179,6 +1362,44 @@ var FLICKER_COOLDOWN = 30,
         n.pose.swingLeft &&
           ((n.arms[0].rotation.x = c[0][0] + (t ? -a * 0.7 : 0)),
           (n.arms[1].rotation.x = c[1][0] - this.recoil * 1.1 - this.chargeLevel * 0.22));
+      const skillPose = this.skillAnimation;
+      if (skillPose && (this.def.id === `gojo` || this.def.id === `sukuna`)) {
+        const progress = $c(skillPose.t / Math.max(0.1, skillPose.duration || 0.5), 0, 1);
+        const weight = skillPose.charging ? 0.62 + this.chargeLevel * 0.38 : Math.sin(progress * Math.PI);
+        const base = n.pose.armBase;
+        if (this.def.id === `gojo` && skillPose.skill === 1) {
+          n.arms[0].rotation.x = el(base[0][0], -0.92, weight);
+          n.arms[0].rotation.z = el(base[0][1], -0.78, weight);
+          n.arms[1].rotation.x = el(base[1][0], -0.45, weight * 0.4);
+        } else if (this.def.id === `gojo` && skillPose.skill === 2) {
+          n.arms[1].rotation.x = el(base[1][0], -1.08, weight);
+          n.arms[1].rotation.z = el(base[1][1], 0.58, weight);
+          n.arms[0].rotation.x = el(base[0][0], -0.36, weight * 0.42);
+        } else if (this.def.id === `sukuna` && skillPose.skill === 1) {
+          const sweep = Math.sin(progress * Math.PI * 2) * 0.3 * weight;
+          n.arms[0].rotation.x = base[0][0] - 0.68 * weight;
+          n.arms[1].rotation.x = base[1][0] - 1.02 * weight;
+          n.arms[0].rotation.z = base[0][1] + 0.42 * weight + sweep;
+          n.arms[1].rotation.z = base[1][1] - 0.55 * weight + sweep;
+        } else if (this.def.id === `sukuna` && skillPose.skill === 2) {
+          const gather = skillPose.charging ? weight : weight * 0.72;
+          n.arms[0].rotation.x = base[0][0] - (skillPose.charging ? 0.58 : 1.02) * gather;
+          n.arms[1].rotation.x = base[1][0] - (skillPose.charging ? 0.58 : 1.02) * gather;
+          n.arms[0].rotation.z = el(base[0][1], -0.44, gather);
+          n.arms[1].rotation.z = el(base[1][1], 0.44, gather);
+        } else if (this.def.id === `sukuna` && skillPose.skill === 0) {
+          const sweep = Math.sin(progress * Math.PI) * 0.5;
+          n.arms[0].rotation.x = base[0][0] - 0.42 * sweep;
+          n.arms[1].rotation.x = base[1][0] - 0.9 * sweep;
+          n.arms[0].rotation.z = base[0][1] + 0.42 * sweep;
+          n.arms[1].rotation.z = base[1][1] - 0.48 * sweep;
+        }
+      }
+      if (skillPose && !skillPose.charging) {
+        skillPose.t += e;
+        if (skillPose.t >= skillPose.duration) this.skillAnimation = null;
+      }
+      n.updateVisualPose?.(r, t, Math.min(1, this.chargeLevel + this.recoil * 0.5), skillPose);
       let l = this.flash;
       for (let e of n.flashMats)
         e.emissive.setRGB(l + this.chargeLevel * 0.3, l * 0.92 + this.chargeLevel * 0.2, l * 0.85 + this.chargeLevel * 0.08);

@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="id">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#10131b" />
+  <title>Character Studio — Gelud BakuHantam</title>
+</head>
+<body>
+  <main class="studio">
+    <header><a class="brand" href="./">GELUD<span>BAKUHANTAM</span></a><span class="edition">CHARACTER AUDIT / 01</span><a class="back" href="./">Kembali ke game ↗</a></header>
+    <section class="intro"><div><p class="eyebrow">ROSTER VISUAL REVIEW</p><h1>Seluruh roster.<br>Satu arena.</h1></div><p class="intro-note">10 karakter<br><span>Roster aktif + redesign Gojo &amp; Sukuna</span></p></section>
+    <section class="viewport" id="model-viewport" aria-label="Preview model 3D interaktif">
+      <canvas id="studio-canvas" aria-label="Model Gojo dan Sukuna. Seret untuk memutar, scroll untuk zoom."></canvas>
+      <div id="loading" role="status">Menyiapkan model…</div>
+      <div class="model-tabs" role="group" aria-label="Pilih model"><button data-model="both" aria-pressed="true">Keduanya</button><button data-model="gojo" aria-pressed="false">Gojo</button><button data-model="sukuna" aria-pressed="false">Sukuna</button></div>
+      <div class="caption"><div><span class="dot blue"></span><strong id="left-name">GOJO</strong><small id="left-role">SPACE MANIPULATOR</small></div><div id="right-caption"><span class="dot red"></span><strong>SUKUNA</strong><small>CURSED SLAYER</small></div></div>
+      <p class="drag-hint">SERET UNTUK MEMUTAR · SCROLL UNTUK ZOOM</p>
+    </section>
+    <section class="controls" aria-label="Kontrol preview">
+      <div><span class="control-label">SUDUT</span><div class="button-row"><button data-view="front" aria-pressed="true">Depan</button><button data-view="side" aria-pressed="false">Samping</button><button data-view="back" aria-pressed="false">Belakang</button><button data-view="arena" aria-pressed="false">Kamera game</button></div></div>
+      <div><span class="control-label">GERAK</span><div class="button-row"><button data-motion="idle" aria-pressed="true">Idle</button><button data-motion="walk" aria-pressed="false">Jalan</button><button data-motion="cast" aria-pressed="false">Cast</button></div></div>
+      <div class="switches"><label><input id="turntable" type="checkbox" /> Putar otomatis</label><label><input id="energy" type="checkbox" checked /> Energi tangan</label></div>
+    </section>
+    <footer><p>Studi model dan animasi. Skill serta stat baru belum aktif dalam pertandingan.</p><span id="model-stats" aria-live="polite"></span></footer>
+    <section class="roster-audit" id="roster-audit" aria-labelledby="roster-title">
+      <div class="roster-heading"><div><p class="eyebrow">01 — FULL CHARACTER LINEUP</p><h2 id="roster-title">Audit semua karakter</h2></div><p>Pilih kartu untuk membuka model 3D lebih besar di atas.</p></div>
+      <div class="roster-grid" id="roster-grid" aria-live="polite"></div>
+      <p class="roster-loading" id="roster-loading" role="status">Menyiapkan semua model untuk audit…</p>
+    </section>
+  </main>
+  <script type="module" src="/src/character-studio.js"></script>
+</body>
+</html>

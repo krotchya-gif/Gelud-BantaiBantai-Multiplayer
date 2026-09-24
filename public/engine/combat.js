@@ -35,7 +35,8 @@ var Su = class {
         (this.items = []),
         (this.itemPool = []),
         (this.arrowShowers = []),
-        (this.arrowFalls = []));
+        (this.arrowFalls = []),
+        (this.characterAreas = []));
       let t = new xr(1, 10, 8);
       ((this.bulletMesh = new Yn(t, new Tn({ color: 16777215 }), bu)),
         (this.bulletMesh.count = 0),
@@ -55,9 +56,18 @@ var Su = class {
       }
       this.arrowShowerDiscGeometry = new mr(3.4, 48).rotateX(-Math.PI / 2);
       this.arrowShowerRingGeometry = new br(3.22, 3.4, 64).rotateX(-Math.PI / 2);
+      this.characterAreaOrbGeometry = eu(0.28, 16, 12);
       this.arrowShowerDiscMaterial = new Tn({ color: 0xffd17a, transparent: !0, opacity: 0.18, depthWrite: !1 });
       this.arrowShowerRingMaterial = new Tn({ color: 0xffe5a5, transparent: !0, opacity: 0.92, depthWrite: !1 });
       this.arrowShowerColor = new J(0xffd17a);
+      this.characterProjectileGeometry = new xr(0.2, 12, 8);
+      this.characterProjectileMaterial = new Nr({ color: 0xffffff, emissive: 0xff5b1b, emissiveIntensity: 2.2, roughness: 0.28, metalness: 0.12 });
+      this.characterProjectileMesh = new Yn(this.characterProjectileGeometry, this.characterProjectileMaterial, bu);
+      this.characterProjectileMesh.count = 0;
+      this.characterProjectileMesh.frustumCulled = !1;
+      this.characterProjectileMesh.userData.noAO = !0;
+      e.scene.add(this.characterProjectileMesh);
+      this.characterProjectiles = [];
       let n = new xr(0.2, 16, 12),
         r = new Nr({ color: 1776418, roughness: 0.35, metalness: 0.3 }),
         i = new xr(0.07, 8, 6);
@@ -294,7 +304,16 @@ var Su = class {
           melee: !0,
           returning: !1,
         }, dealt);
-        attack.knockback && target.applyKnockback((x / distance) * attack.knockback, (z / distance) * attack.knockback);
+        if (dealt > 0 && !target.lastDamageBlocked && (attack.push || attack.pull)) {
+          let amount = attack.push || -attack.pull,
+            point = target.root.position.clone();
+          point.x += (x / distance) * amount;
+          point.z += (z / distance) * amount;
+          this.game.world.resolveCircle(point, Ic);
+          target.root.position.copy(point);
+        } else if (attack.knockback) {
+          target.applyKnockback((x / distance) * attack.knockback, (z / distance) * attack.knockback);
+        }
       }
       for (let box of this.boxes) {
         if (!box.alive) continue;
@@ -384,6 +403,325 @@ var Su = class {
       }
       this.game.effects.impact(x, 0.08, z, this.arrowShowerColor, 18);
       this.game.audio.play(`hit`, x, z);
+    }
+    skillLineEnd(owner, dx, dz, range) {
+      const length = Math.hypot(dx, dz) || 1;
+      dx /= length;
+      dz /= length;
+      const requestedX = owner.x + dx * range;
+      const requestedZ = owner.z + dz * range;
+      const hit = this.game.world.raycast(owner.x, owner.z, requestedX, requestedZ);
+      const distance = hit ? Math.max(0, hit.dist - 0.08) : range;
+      return { x: owner.x + dx * distance, z: owner.z + dz * distance, dx, dz };
+    }
+    skillLineTargets(owner, endpoint, width, maximum = Infinity) {
+      const vx = endpoint.x - owner.x;
+      const vz = endpoint.z - owner.z;
+      const lengthSq = vx * vx + vz * vz;
+      const targets = [];
+      for (const target of this.game.brawlers) {
+        if (!target.alive || target === owner || target.airborne) continue;
+        const along = lengthSq > 1e-8 ? $c(((target.x - owner.x) * vx + (target.z - owner.z) * vz) / lengthSq, 0, 1) : 0;
+        const x = owner.x + vx * along;
+        const z = owner.z + vz * along;
+        if (Math.hypot(target.x - x, target.z - z) > width + 0.45) continue;
+        if (!this.game.world.hasLineOfSight(owner.x, owner.z, target.x, target.z)) continue;
+        targets.push({ target, distance: along * Math.sqrt(lengthSq) });
+      }
+      targets.sort((a, b) => a.distance - b.distance);
+      return targets.slice(0, maximum).map(({ target }) => target);
+    }
+    displaceBrawler(target, dx, dz, distance) {
+      const length = Math.hypot(dx, dz) || 1;
+      dx /= length;
+      dz /= length;
+      const steps = Math.max(1, Math.ceil(distance / 0.12));
+      const amount = distance / steps;
+      const point = new H(target.x, 0, target.z);
+      let collided = !1;
+      for (let index = 0; index < steps; index += 1) {
+        const beforeX = point.x;
+        const beforeZ = point.z;
+        point.x += dx * amount;
+        point.z += dz * amount;
+        this.game.world.resolveCircle(point, Ic);
+        if (Math.hypot(point.x - beforeX, point.z - beforeZ) < amount * 0.55) {
+          collided = !0;
+          break;
+        }
+      }
+      target.root.position.set(point.x, target.root.position.y, point.z);
+      target.knock.set(0, 0);
+      return collided;
+    }
+    gojoRepulse(owner, dx, dz, attack) {
+      const end = this.skillLineEnd(owner, dx, dz, attack.range);
+      for (const target of this.skillLineTargets(owner, end, attack.width)) {
+        const dealt = target.takeDamage(Math.round(attack.damage * owner.damageMul), owner, !1, { kind: `skill`, dirX: end.dx, dirZ: end.dz });
+        if (dealt <= 0 || target.lastDamageBlocked || !target.alive) continue;
+        const awayX = target.x - owner.x;
+        const awayZ = target.z - owner.z;
+        if (this.displaceBrawler(target, awayX, awayZ, attack.knockback) && target.alive)
+          target.applyHardCC(attack.wallStun, `stun`, owner);
+        this.game.effects.impact(target.x, 0.72, target.z, new J(attack.color || 0xff456d), 12);
+      }
+      this.game.effects.muzzle(owner.x + end.dx * 0.35, 0.74, owner.z + end.dz * 0.35, end.dx, end.dz, new J(attack.color || 0xff456d), 1.6);
+      this.game.effects.impact(end.x, 0.08, end.z, new J(attack.color || 0xff456d), 16);
+      this.game.audio.play(`shotBig`, owner.x, owner.z);
+    }
+    sukunaLongSlash(owner, dx, dz, attack) {
+      const end = this.skillLineEnd(owner, dx, dz, attack.range);
+      for (const target of this.skillLineTargets(owner, end, attack.width, attack.maxTargets)) {
+        target.takeDamage(Math.round(attack.damage * owner.damageMul), owner, !1, { kind: `skill`, dirX: end.dx, dirZ: end.dz });
+        this.game.effects.impact(target.x, 0.72, target.z, new J(attack.color || 0xe52d45), 10);
+      }
+      this.game.effects.muzzle(owner.x + end.dx * 0.35, 0.74, owner.z + end.dz * 0.35, end.dx, end.dz, new J(attack.color || 0xe52d45), 1.35);
+      this.game.effects.impact(end.x, 0.08, end.z, new J(attack.color || 0xe52d45), 14);
+      this.game.audio.play(`shotBig`, owner.x, owner.z);
+    }
+    startCharacterArea(owner, kind, x, z, attack, isSuper = !1) {
+      const dx = Number.isFinite(x) ? x - owner.x : Math.sin(owner.facing);
+      const dz = Number.isFinite(z) ? z - owner.z : Math.cos(owner.facing);
+      const distance = Math.hypot(dx, dz);
+      const range = attack.range || 0;
+      const end = this.skillLineEnd(owner, dx, dz, Math.min(range, distance || range));
+      x = $c(end.x, -21.4, 21.4);
+      z = $c(end.z, -21.4, 21.4);
+      const marker = new ut();
+      const color = new J(attack.color || (owner.def.id === `gojo` ? 0x4777ff : 0xe52d45));
+      const disc = new Ln(this.arrowShowerDiscGeometry, this.arrowShowerDiscMaterial.clone());
+      const ring = new Ln(this.arrowShowerRingGeometry, this.arrowShowerRingMaterial.clone());
+      disc.material.color.copy(color);
+      ring.material.color.copy(color);
+      disc.material.opacity = isSuper ? 0.08 : 0.14;
+      ring.material.opacity = isSuper ? 0.85 : 0.95;
+      disc.userData.noAO = ring.userData.noAO = marker.userData.noAO = !0;
+      disc.renderOrder = ring.renderOrder = marker.renderOrder = 3;
+      marker.add(disc, ring);
+      let orb = null;
+      if (kind === `gojo-pull`) {
+        orb = new Ln(this.characterAreaOrbGeometry, new Nr({
+          color: 0x8fbaff, emissive: 0x346dff, emissiveIntensity: 2.8, roughness: 0.2, metalness: 0.08,
+          transparent: true, opacity: 1, depthWrite: false,
+        }));
+        orb.position.y = 0.76;
+        orb.userData.noAO = true;
+        marker.add(orb);
+      }
+      marker.position.set(x, 0.055, z);
+      marker.scale.setScalar((attack.radius || 2.4) / 3.4);
+      this.game.scene.add(marker);
+      const area = {
+        owner, kind, x, z, attack, marker, disc, ring, orb,
+        remaining: isSuper ? attack.warningDelay + attack.duration : attack.duration,
+        warningRemaining: isSuper ? attack.warningDelay : 0,
+        activeRemaining: isSuper ? attack.duration : attack.duration,
+        activated: !isSuper,
+        nextWave: 0,
+        waves: attack.waveCount || 0,
+        hitTargets: new Set(),
+        blockedTargets: new Set(),
+        slowKey: `gojo:${owner.networkId || owner.id}`,
+      };
+      this.characterAreas.push(area);
+      owner.attackSerial++;
+      owner.recoil = 0.9;
+      if (!isSuper) this.game.audio.play(`zap`, owner.x, owner.z);
+      return area;
+    }
+    hitCharacterArea(area) {
+      const { owner, x, z, attack } = area;
+      for (const target of this.game.brawlers) {
+        if (!target.alive || target === owner || target.airborne || Math.hypot(target.x - x, target.z - z) > (attack.radius || 0)) continue;
+        const dealt = target.takeDamage(Math.round((attack.waveDamage || attack.damage || 0) * owner.damageMul), owner, !1, { kind: `area` });
+        if (attack.burnDamage > 0 && dealt > 0 && !target.lastDamageBlocked && target.alive) {
+          target.applyStatusDoT(`burn`, owner, attack.burnDamage, attack.burnDuration);
+          this.game.effects.impact(target.x, 0.84, target.z, new J(0xe52d45), 7);
+        }
+      }
+      if (area.kind === `sukuna-zone`) this.breakCoverCircle(x, z, attack.radius);
+      const color = new J(attack.color || 0xe52d45);
+      this.game.effects.ring(x, z, attack.radius || 2.4, color, 0.35, 2.2);
+      this.game.audio.play(`hit`, x, z);
+    }
+    breakCoverCircle(x, z, radius) {
+      const world = this.game.world;
+      const reach = Math.ceil(radius);
+      const centerX = world.toTile(x);
+      const centerZ = world.toTile(z);
+      for (let dz = -reach; dz <= reach; dz++) {
+        for (let dx = -reach; dx <= reach; dx++) {
+          const tx = centerX + dx;
+          const tz = centerZ + dz;
+          if (Math.hypot(world.center(tx) - x, world.center(tz) - z) > radius) continue;
+          const broken = world.destroyTile(tx, tz);
+          if (broken) this.game.effects.debris(broken.x, 0.6, broken.z, new J(0x877967), 5);
+        }
+      }
+    }
+    detonateSukunaFlame(projectile, x, z) {
+      const radius = projectile.blast;
+      for (const target of this.game.brawlers) {
+        if (!target.alive || target === projectile.owner || target.airborne || Math.hypot(target.x - x, target.z - z) > radius + 0.45) continue;
+        const dealt = target.takeDamage(Math.round(projectile.damage * projectile.owner.damageMul), projectile.owner, !1, { kind: `skill-flame` });
+        if (dealt > 0 && !target.lastDamageBlocked && target.alive)
+          target.applyStatusDoT(`burn`, projectile.owner, projectile.burnDamage, projectile.burnDuration);
+      }
+      const color = projectile.color?.isColor ? projectile.color : new J(projectile.color || 0xff642e);
+      this.game.effects.explosion(x, z, radius, color, !1);
+      this.game.audio.play(`boom`, x, z);
+    }
+    spawnSukunaFlame(owner, dx, dz, damage, range, chargedAttack) {
+      const length = Math.hypot(dx, dz) || 1;
+      dx /= length;
+      dz /= length;
+      const muzzle = owner.muzzleWorld(new H());
+      this.characterProjectiles.push({
+        owner, x: muzzle.x, z: muzzle.z, dx, dz, speed: chargedAttack?.projectileSpeed || 18,
+        range, travelled: 0, damage, blast: chargedAttack?.blast || 0,
+        burnDamage: chargedAttack?.burnDamage || 0, burnDuration: chargedAttack?.burnDuration || 0,
+        color: new J(chargedAttack?.color || 0xff642e), alive: !0,
+      });
+      owner.recoil = 1;
+      this.game.effects.muzzle(muzzle.x, muzzle.y, muzzle.z, dx, dz, new J(chargedAttack?.color || 0xff642e), 1.45);
+      this.game.audio.play(`shotBig`, owner.x, owner.z);
+    }
+    updateCharacterAreas(dt) {
+      let live = 0;
+      for (const area of this.characterAreas) {
+        if (!area.activated) {
+          area.warningRemaining -= dt;
+          if (area.warningRemaining <= 0) {
+            area.activated = !0;
+            area.activeRemaining = area.attack.duration;
+            area.nextWave = 0;
+            if (area.kind === `gojo-domain`) {
+              for (const target of this.game.brawlers) {
+                if (!target.alive || target === area.owner || target.airborne || target.spawnT > 0 || target.flickerInvulnT > 0 || Math.hypot(target.x - area.x, target.z - area.z) > area.attack.radius + 0.45) continue;
+                target.applyHardCC(area.attack.freeze, `freeze`, area.owner);
+              }
+              this.game.effects.flash(area.x, 0.82, area.z, new J(0x617cff), 25, 8, 0.3);
+            } else {
+              this.hitCharacterArea(area);
+              area.waves--;
+              area.nextWave += area.attack.waveInterval;
+            }
+          }
+        } else if (area.kind === `gojo-pull`) {
+          area.remaining -= dt;
+          for (const target of this.game.brawlers) {
+            if (!target.alive || target === area.owner || target.airborne || Math.hypot(target.x - area.x, target.z - area.z) > area.attack.radius + 0.45) continue;
+            if (!area.hitTargets.has(target)) {
+              area.hitTargets.add(target);
+              const dealt = target.takeDamage(Math.round(area.attack.damage * area.owner.damageMul), area.owner, !1, { kind: `skill` });
+              if (dealt <= 0 || target.lastDamageBlocked || !target.alive) {
+                area.blockedTargets.add(target);
+                continue;
+              }
+              target.slowEffects.set(area.slowKey, { multiplier: 1 - area.attack.slow, remaining: area.remaining });
+            }
+            if (area.blockedTargets.has(target) || target.hardCCT > 0) continue;
+            const dx = area.x - target.x;
+            const dz = area.z - target.z;
+            const distance = Math.hypot(dx, dz);
+            if (distance > 0.08) this.displaceBrawler(target, dx, dz, Math.min(distance, area.attack.pullSpeed * dt));
+          }
+        } else if (area.kind === `sukuna-zone`) {
+          area.activeRemaining -= dt;
+          area.nextWave -= dt;
+          while (area.nextWave <= 0 && area.waves > 0) {
+            this.hitCharacterArea(area);
+            area.waves--;
+            area.nextWave += area.attack.waveInterval;
+          }
+        } else {
+          area.activeRemaining -= dt;
+        }
+        if (area.kind !== `gojo-pull`) area.remaining = area.activated ? area.activeRemaining : area.warningRemaining + area.attack.duration;
+        if (area.disc?.material) area.disc.material.opacity = area.activated ? 0.12 : 0.07 + Math.max(0, Math.sin(this.game.elapsed * 18)) * 0.08;
+        if (area.ring?.material) area.ring.material.opacity = area.activated ? 0.8 : 0.55 + Math.max(0, Math.sin(this.game.elapsed * 18)) * 0.4;
+        area.marker.scale.setScalar((area.attack.radius || 2.4) / 3.4 * (area.activated ? 1 + Math.sin(this.game.elapsed * 13) * 0.018 : 1));
+        if (area.orb) {
+          const fade = $c(area.remaining / 0.22, 0, 1);
+          area.orb.position.y = 0.76 + Math.sin(this.game.elapsed * 8) * 0.09;
+          area.orb.rotation.y += dt * 2.8;
+          area.orb.scale.setScalar((0.86 + Math.sin(this.game.elapsed * 11) * 0.12) * (0.72 + fade * 0.28));
+          area.orb.material.opacity = fade;
+        }
+        if (area.remaining <= 0 || (area.kind === `sukuna-zone` && area.waves <= 0)) {
+          for (const target of this.game.brawlers) target.slowEffects?.delete(area.slowKey);
+          area.marker.removeFromParent();
+          disposeRendererResources([area.disc.material, area.ring.material, area.orb?.material]);
+          continue;
+        }
+        this.characterAreas[live++] = area;
+      }
+      this.characterAreas.length = live;
+    }
+    updateCharacterProjectiles(dt) {
+      let live = 0;
+      let count = 0;
+      const matrices = this.characterProjectileMesh;
+      for (const projectile of this.characterProjectiles) {
+        const step = Math.min(projectile.speed * dt, Math.max(0, projectile.range - projectile.travelled));
+        const fromX = projectile.x;
+        const fromZ = projectile.z;
+        let toX = fromX + projectile.dx * step;
+        let toZ = fromZ + projectile.dz * step;
+        const wall = step > 0 ? this.game.world.raycast(fromX, fromZ, toX, toZ) : null;
+        if (wall) {
+          const distance = Math.max(0, wall.dist - 0.05);
+          toX = fromX + projectile.dx * distance;
+          toZ = fromZ + projectile.dz * distance;
+        }
+        projectile.x = toX;
+        projectile.z = toZ;
+        projectile.travelled += Math.hypot(toX - fromX, toZ - fromZ);
+        let hitTarget = null;
+        let hitDistance = Infinity;
+        for (const target of this.game.brawlers) {
+          if (!target.alive || target === projectile.owner || target.airborne) continue;
+          const vx = toX - fromX;
+          const vz = toZ - fromZ;
+          const lengthSq = vx * vx + vz * vz;
+          const along = lengthSq > 1e-8 ? $c(((target.x - fromX) * vx + (target.z - fromZ) * vz) / lengthSq, 0, 1) : 0;
+          const x = fromX + vx * along;
+          const z = fromZ + vz * along;
+          const distance = Math.hypot(target.x - x, target.z - z);
+          if (distance <= 0.45 + (projectile.radius || 0.18) && along < hitDistance) { hitTarget = target; hitDistance = along; }
+        }
+        if (hitTarget) {
+          if (projectile.blast > 0) this.detonateSukunaFlame(projectile, toX, toZ);
+          else {
+            const dealt = hitTarget.takeDamage(Math.round(projectile.damage * projectile.owner.damageMul), projectile.owner, !1, { kind: `skill-flame`, dirX: projectile.dx, dirZ: projectile.dz });
+            projectile.owner.onAttackHit(hitTarget, { a: { kind: `skill-flame` }, attackId: projectile.owner.attackSerial, travel: projectile.travelled, range: projectile.range, melee: !1 }, dealt);
+            this.game.effects.impact(toX, 0.72, toZ, projectile.color, 8);
+          }
+          continue;
+        }
+        if (wall || projectile.travelled >= projectile.range) {
+          if (projectile.blast > 0) this.detonateSukunaFlame(projectile, toX, toZ);
+          else this.game.effects.impact(toX, 0.72, toZ, projectile.color, 4);
+          continue;
+        }
+        if (count < matrices.instanceMatrix.count) {
+          _u.set(0, Math.atan2(projectile.dx, projectile.dz), 0);
+          mu.setFromEuler(_u);
+          pu.compose(hu.set(projectile.x, 0.76, projectile.z), mu, gu.setScalar(1));
+          matrices.setMatrixAt(count, pu);
+          matrices.setColorAt(count, projectile.color);
+          count++;
+        }
+        this.game.lighting.addLight(projectile.x, 0.76, projectile.z, projectile.color, 2.4, 3.2);
+        this.game.effects.trail(projectile.x, 0.76, projectile.z, projectile.color, 0.26);
+        this.characterProjectiles[live++] = projectile;
+      }
+      this.characterProjectiles.length = live;
+      matrices.count = count;
+      if (count) {
+        matrices.instanceMatrix.needsUpdate = !0;
+        if (matrices.instanceColor) matrices.instanceColor.needsUpdate = !0;
+      }
     }
     spawnBomb(e, t, n, r, i, a, o, s) {
       let c = this.bombPool.find((e) => !e.busy);
@@ -743,7 +1081,6 @@ var Su = class {
             this.removeItem(item),
             i.burst(item.x, 0.7, item.z, this.itemLights[kind], 10, 3.1),
             (!brawler.hidden || brawler.isPlayer) && t.hud.floatText(brawler.x, 2, brawler.z, `${label}!`, `power`),
-            brawler.isPlayer && t.hud.toast(`${label} READY · SLOT ${slot + 1} · PRESS ${slot === 0 ? `F` : `G`}`),
             t.audio.play(`pickup`, item.x, item.z));
           break;
         }
@@ -751,11 +1088,21 @@ var Su = class {
       let liveItems = 0;
       for (let e = 0; e < this.items.length; e++) this.items[e].alive && (this.items[liveItems++] = this.items[e]);
       this.items.length = liveItems;
+      this.updateCharacterAreas(e);
+      this.updateCharacterProjectiles(e);
     }
     clear() {
       let e = this.game.scene;
       ((this.bullets.length = 0), (this.bulletMesh.count = 0));
       for (let mesh of Object.values(this.weaponProjectiles)) mesh.count = 0;
+      for (const area of this.characterAreas) {
+        area.marker.removeFromParent();
+        disposeRendererResources([area.disc.material, area.ring.material, area.orb?.material]);
+        for (const target of this.game.brawlers) target.slowEffects?.delete(area.slowKey);
+      }
+      this.characterAreas.length = 0;
+      this.characterProjectiles.length = 0;
+      this.characterProjectileMesh.count = 0;
       for (let shower of this.arrowShowers) shower.marker.removeFromParent();
       this.arrowShowers.length = 0;
       this.arrowFalls.length = 0;

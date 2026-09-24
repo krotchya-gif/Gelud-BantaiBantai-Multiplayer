@@ -26,6 +26,56 @@ export class MapCollision {
     return tile ? this.layout.cellsData[tile.index]?.meta ?? null : null;
   }
 
+  destroyCoverAt(tileX, tileZ) {
+    if (!this.layout || !Number.isInteger(tileX) || !Number.isInteger(tileZ)) return false;
+    const index = tileZ * this.layout.size + tileX;
+    const cell = this.layout.cellsData[index];
+    if (!cell || cell.kind !== this.layout.cells.WALL || cell.style === 'rock' || cell.style === 'lamp' || cell.meta?.indestructible) return false;
+    this.layout.cellsData[index] = { ...cell, kind: this.layout.cells.EMPTY, meta: { ...cell.meta, destroyed: true } };
+    this.rebuildBlockers();
+    return true;
+  }
+
+  getBrokenCoverTiles() {
+    if (!this.layout) return [];
+    const broken = [];
+    for (let index = 0; index < this.layout.cellsData.length; index += 1) {
+      if (this.layout.cellsData[index]?.meta?.destroyed) broken.push({ tileX: index % this.layout.size, tileZ: Math.floor(index / this.layout.size) });
+    }
+    return broken;
+  }
+
+  rebuildBlockers() {
+    const solid = new Set([this.layout.cells.WALL, this.layout.cells.WATER]);
+    this.blockers = [];
+    let previousRuns = new Map();
+    for (let tileZ = 0; tileZ < this.layout.size; tileZ += 1) {
+      const nextRuns = new Map();
+      let tileX = 0;
+      while (tileX < this.layout.size) {
+        if (!solid.has(this.layout.cellsData[tileZ * this.layout.size + tileX]?.kind)) { tileX += 1; continue; }
+        const start = tileX;
+        while (tileX < this.layout.size && solid.has(this.layout.cellsData[tileZ * this.layout.size + tileX]?.kind)) tileX += 1;
+        const key = `${start}:${tileX}`;
+        const existing = previousRuns.get(key);
+        if (existing) {
+          existing.maxZ = tileZ + 1 + this.layout.origin.z;
+          nextRuns.set(key, existing);
+        } else {
+          const blocker = {
+            minX: start + this.layout.origin.x,
+            maxX: tileX + this.layout.origin.x,
+            minZ: tileZ + this.layout.origin.z,
+            maxZ: tileZ + 1 + this.layout.origin.z,
+          };
+          this.blockers.push(blocker);
+          nextRuns.set(key, blocker);
+        }
+      }
+      previousRuns = nextRuns;
+    }
+  }
+
   surfaceAt(x, z) {
     const cell = this.cellAt(x, z);
     if (!this.layout || cell == null) return 'normal';

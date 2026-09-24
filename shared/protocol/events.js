@@ -10,6 +10,7 @@ export const CLIENT_EVENTS = Object.freeze({
   inputMove: 'input:move',
   actionAttackStart: 'action:attack-start',
   actionAttackRelease: 'action:attack-release',
+  actionSkill: 'action:skill',
   actionSuper: 'action:super',
   actionItem: 'action:item',
   actionFlicker: 'action:flicker',

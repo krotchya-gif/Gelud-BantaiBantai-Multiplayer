@@ -3,6 +3,7 @@ import { GameSimulation } from '../../shared/simulation/GameSimulation.js';
 import { MapCollision } from '../../shared/maps/MapCollision.js';
 import { buildSnapshot } from '../../server/match/SnapshotBuilder.js';
 import { NetworkGameSession } from '../../src/multiplayer/NetworkGameSession.js';
+import { applyDamage } from '../../shared/simulation/CombatSystem.js';
 
 describe('authoritative super and items', () => {
   it('uses a charged super and emits its authoritative event', () => {
@@ -81,6 +82,177 @@ describe('authoritative super and items', () => {
     const snapshot = buildSnapshot(simulation);
     expect(snapshot.areaEffects[0].color).toBe(0xfff0aa);
     expect(simulation.tick(1 / 30).some((event) => event.type === 'SUPER_ZONE' && event.color === 0xfff0aa)).toBe(true);
+  });
+
+  it('keeps the authoritative Titan leap airborne, invulnerable, and delayed until landing', () => {
+    const simulation = new GameSimulation({
+      collision: new MapCollision({ minX: -12, maxX: 12, minZ: -12, maxZ: 12 }),
+      players: [
+        { id: 'titan', name: 'T', characterId: 'titan', x: 0, z: 0 },
+        { id: 'target', name: 'D', characterId: 'dusty', x: 0, z: 3 },
+      ],
+    });
+    const titan = simulation.state.players.get('titan');
+    const target = simulation.state.players.get('target');
+    titan.superCharge = 1;
+
+    expect(simulation.super('titan', { aimX: 0, aimZ: 1, targetX: 0, targetZ: 3 })).toBe(true);
+    const leapEvent = simulation.state.events.find((event) => event.type === 'SUPER_DASH' && event.ownerId === 'titan');
+    expect(leapEvent.duration).toBeCloseTo(0.75);
+    expect(leapEvent.leap).toBe(true);
+    expect(titan.airborneT).toBeCloseTo(0.75);
+    expect(buildSnapshot(simulation).players.find((player) => player.id === 'titan').airborneT).toBeCloseTo(0.75);
+    expect(simulation.attackStart('titan', 0, 1)).toBe(false);
+    expect(simulation.flicker('titan', { dirX: 1, dirZ: 0 })).toBe(false);
+    expect(applyDamage(simulation.state, titan, 4000, target)).toBe(0);
+    expect(titan.hp).toBe(titan.maxHp);
+    expect(target.hp).toBe(target.maxHp);
+
+    expect(simulation.setInput('titan', { seq: 1, moveX: 1, moveZ: 0 })).toBe(true);
+    const landingEvents = [];
+    for (let index = 0; index < 12; index += 1) landingEvents.push(...simulation.tick(1 / 30));
+    expect(titan.x).toBe(0);
+    expect(titan.airborneT).toBeGreaterThan(0);
+    expect(target.hp).toBe(target.maxHp);
+    for (let index = 0; index < 12; index += 1) landingEvents.push(...simulation.tick(1 / 30));
+
+    expect(titan.airborneT).toBe(0);
+    expect(titan.leapState).toBeNull();
+    expect(target.hp).toBe(target.maxHp - 1000);
+    expect(landingEvents.some((event) => event.type === 'EXPLOSION' && event.ownerId === 'titan')).toBe(true);
+  });
+
+  it('extends the authoritative Titan leap duration in low-gravity terrain', () => {
+    const collision = new MapCollision({ minX: -12, maxX: 12, minZ: -12, maxZ: 12 });
+    collision.surfaceAt = () => 'low-gravity';
+    collision.layout = { gameplay: { lowGravityMultiplier: 0.58 } };
+    const simulation = new GameSimulation({
+      collision,
+      players: [{ id: 'titan', name: 'T', characterId: 'titan', x: 0, z: 0 }],
+    });
+    const titan = simulation.state.players.get('titan');
+    titan.superCharge = 1;
+
+    expect(simulation.super('titan', { aimX: 0, aimZ: 1, targetX: 0, targetZ: 3 })).toBe(true);
+    expect(titan.airborneT).toBeCloseTo(0.75 / Math.sqrt(0.58));
+    expect(simulation.state.events.find((event) => event.type === 'SUPER_DASH').duration).toBeCloseTo(titan.airborneT);
+  });
+
+  it('does not let Gojo Domain freeze an airborne Titan', () => {
+    const simulation = new GameSimulation({
+      collision: new MapCollision({ minX: -12, maxX: 12, minZ: -12, maxZ: 12 }),
+      players: [
+        { id: 'titan', name: 'T', characterId: 'titan', x: 0, z: 0 },
+        { id: 'gojo', name: 'G', characterId: 'gojo', x: 0, z: 8 },
+      ],
+    });
+    const titan = simulation.state.players.get('titan');
+    titan.superCharge = 1;
+    simulation.state.players.get('gojo').superCharge = 1;
+
+    expect(simulation.super('titan', { aimX: 0, aimZ: 1, targetX: 0, targetZ: 3 })).toBe(true);
+    expect(simulation.super('gojo', { aimX: 0, aimZ: -1, targetX: 0, targetZ: 3 })).toBe(true);
+    const events = [];
+    for (let index = 0; index < 16; index += 1) events.push(...simulation.tick(1 / 30));
+
+    expect(events.some((event) => event.type === 'DOMAIN_ACTIVATED')).toBe(true);
+    expect(titan.airborneT).toBeGreaterThan(0);
+    expect(titan.hardCCT).toBe(0);
+  });
+
+  it('lets Gojo barrier absorb a domain freeze in the authoritative simulation', () => {
+    const simulation = new GameSimulation({
+      players: [
+        { id: 'attacker', name: 'A', characterId: 'gojo', x: 0, z: 0 },
+        { id: 'defender', name: 'B', characterId: 'gojo', x: 2.5, z: 0 },
+      ],
+    });
+    const attacker = simulation.state.players.get('attacker');
+    const defender = simulation.state.players.get('defender');
+    attacker.superCharge = 1;
+    defender.gojoBarrier = true;
+
+    expect(simulation.super('attacker', { aimX: 1, aimZ: 0, targetX: 2.5, targetZ: 0 })).toBe(true);
+    const events = [];
+    for (let index = 0; index < 20; index += 1) events.push(...simulation.tick(1 / 30));
+
+    expect(defender.gojoBarrier).toBe(false);
+    expect(defender.hardCCT).toBe(0);
+    expect(events.some((event) => event.type === 'BARRIER_BLOCKED' && event.targetId === 'defender')).toBe(true);
+    expect(events.some((event) => event.type === 'HARD_CC' && event.targetId === 'defender')).toBe(false);
+  });
+
+  it('applies Gojo pull damage once while the authoritative area pulls and slows', () => {
+    const simulation = new GameSimulation({
+      collision: new MapCollision({ minX: -12, maxX: 12, minZ: -12, maxZ: 12 }),
+      players: [
+        { id: 'gojo', name: 'G', characterId: 'gojo', x: 0, z: 0 },
+        { id: 'target', name: 'T', characterId: 'dusty', x: 0, z: 3 },
+      ],
+    });
+    const target = simulation.state.players.get('target');
+
+    expect(simulation.skill('gojo', { skill: 1, aimX: 0, aimZ: 1, targetX: 0, targetZ: 2 })).toBe(true);
+    simulation.tick(1 / 30);
+    const firstPullPosition = target.z;
+    for (let index = 0; index < 5; index += 1) simulation.tick(1 / 30);
+
+    expect(target.hp).toBe(target.maxHp - 300);
+    expect(target.z).toBeLessThan(firstPullPosition);
+    expect(target.slowEffects.get('gojo:gojo')).toMatchObject({ multiplier: 0.7 });
+  });
+
+  it('caps Sukuna long slash at three targets and resolves charged flame on the server', () => {
+    const simulation = new GameSimulation({
+      collision: new MapCollision({ minX: -12, maxX: 12, minZ: -12, maxZ: 12 }),
+      players: [
+        { id: 'sukuna', name: 'S', characterId: 'sukuna', x: 0, z: 0 },
+        { id: 'one', name: '1', characterId: 'dusty', x: 0, z: 2 },
+        { id: 'two', name: '2', characterId: 'dusty', x: 0, z: 4 },
+        { id: 'three', name: '3', characterId: 'dusty', x: 0, z: 6 },
+        { id: 'four', name: '4', characterId: 'dusty', x: 0, z: 7.1 },
+      ],
+    });
+
+    expect(simulation.skill('sukuna', { skill: 1, aimX: 0, aimZ: 1 })).toBe(true);
+    simulation.tick(1 / 30);
+    for (const id of ['one', 'two', 'three']) expect(simulation.state.players.get(id).hp).toBe(3300);
+    expect(simulation.state.players.get('four').hp).toBe(3900);
+
+    for (let index = 0; index < 30; index += 1) simulation.tick(1 / 30);
+    expect(simulation.skill('sukuna', { skill: 2, phase: 'start', aimX: 0, aimZ: 1 })).toBe(true);
+    for (let index = 0; index < 30; index += 1) simulation.tick(1 / 30);
+    expect(simulation.skill('sukuna', { skill: 2, phase: 'release', aimX: 0, aimZ: 1 })).toBe(true);
+    const events = [];
+    for (let index = 0; index < 10; index += 1) events.push(...simulation.tick(1 / 30));
+
+    expect(events.some((event) => event.type === 'SKILL_CHARGE_RELEASE' && event.charged)).toBe(true);
+    expect(simulation.state.players.get('one').hp).toBeLessThan(3300);
+    expect(simulation.state.players.get('one').burnT).toBeGreaterThan(0);
+  });
+
+  it('keeps Gojo and Sukuna combat stats and charge state in network snapshots', () => {
+    const simulation = new GameSimulation({
+      players: [
+        { id: 'gojo', name: 'G', characterId: 'gojo' },
+        { id: 'sukuna', name: 'S', characterId: 'sukuna' },
+      ],
+    });
+    const gojo = simulation.state.players.get('gojo');
+    const sukuna = simulation.state.players.get('sukuna');
+
+    expect(buildSnapshot(simulation).players).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: 'gojo', characterName: 'Gojo', maxHp: 3000, ammo: 0, gojoBarrier: false, skillCooldowns: [0, 0] }),
+      expect.objectContaining({ id: 'sukuna', characterName: 'Sukuna', maxHp: 4200, ammo: 3, skillCooldowns: [0, 0], skill2Charging: false }),
+    ]));
+
+    expect(simulation.skill('sukuna', { skill: 2, phase: 'start', aimX: 1, aimZ: 0 })).toBe(true);
+    simulation.tick(1 / 30);
+    const charged = buildSnapshot(simulation).players.find((player) => player.id === 'sukuna');
+    expect(charged.skill2Charging).toBe(true);
+    expect(charged.skillCooldowns[1]).toBeGreaterThan(11.9);
+    expect(gojo.gojoBarrier).toBe(false);
+    expect(sukuna.ammo).toBe(3);
   });
 
   it('applies the same movement modifiers while charging and using speed items', () => {

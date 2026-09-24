@@ -217,12 +217,50 @@ var  Ru = 9,
       this.drawTime = 0;
       return fired;
     }
+    tryCharacterSkill(target, distance) {
+      const b = this.b;
+      if (!target || this.shootT > 0 || !b.def.skills?.length || !b.canAct() || b.spawnT > 0 || b.burst) return !1;
+      const aimAtTarget = (index) => this.aimAt(target.x, target.z, target.vel.x, target.vel.y, b.def.skills[index]);
+      if (b.def.id === `gojo`) {
+        if (distance > 2.2 && distance <= 5 && b.skillCooldowns[1] <= 0 && Math.random() < 0.45) {
+          const aim = aimAtTarget(1);
+          if (b.useSkill(2, `activate`, aim.dx, aim.dz, aim.x, aim.z)) return !0;
+        }
+        if (distance > 2.5 && distance <= b.def.skills[0].range && b.skillCooldowns[0] <= 0) {
+          const aim = aimAtTarget(0);
+          return b.useSkill(1, `activate`, aim.dx, aim.dz, aim.x, aim.z);
+        }
+      } else if (b.def.id === `sukuna`) {
+        if (distance > b.def.attack.range && distance <= b.def.skills[0].range && b.skillCooldowns[0] <= 0) {
+          const aim = aimAtTarget(0);
+          if (b.useSkill(1, `activate`, aim.dx, aim.dz, aim.x, aim.z)) return !0;
+        }
+        if (distance > 3.4 && distance <= b.def.skills[1].tapRange && b.skillCooldowns[1] <= 0 && Math.random() < 0.5) {
+          const aim = aimAtTarget(1);
+          return b.useSkill(2, `start`, aim.dx, aim.dz, aim.x, aim.z);
+        }
+      }
+      return !1;
+    }
     update(e) {
       let { b: t, game: n } = this;
       this.drawDt = e;
       t.isCharging = !1;
       t.chargeLevel = 0;
       if (!t.alive) return;
+      if (t.def.id === `sukuna` && t.skill2Charge) {
+        const charge = t.skill2Charge;
+        const elapsed = Math.max(0, t.game.matchTime - charge.startedAt);
+        t.isCharging = !0;
+        t.chargeLevel = Math.min(1, elapsed / t.def.skills[1].chargeTime);
+        if (elapsed >= t.def.skills[1].chargeTime) {
+          const target = this.target?.alive ? this.target : null;
+          const aim = target ? this.aimAt(target.x, target.z, target.vel.x, target.vel.y, t.def.skills[1]) : charge;
+          if (t.useSkill(2, `release`, aim.dx, aim.dz, aim.x, aim.z)) this.shootT = Q(0.65, 0.9);
+          t.isCharging = !1;
+          t.chargeLevel = 0;
+        }
+      }
       if (n.state === `countdown`) {
         t.moveX = t.moveZ = 0;
         return;
@@ -327,6 +365,7 @@ var  Ru = 9,
               t.useSuper(e.dx, e.dz, e.x, e.z) && (this.shootT = Q(0.4, 0.8));
           }
         }
+        if (a && this.shootT <= 0 && this.tryCharacterSkill(s, e)) this.shootT = Q(0.45, 0.75);
         if (a && e < i.range * 0.95 && this.shootT <= 0 && (!t.usesAmmo || t.ammo >= 1)) {
           let e = this.aimAt(s.x, s.z, s.vel.x, s.vel.y, i);
           this.tryBasicAttack(e.dx, e.dz, e.x, e.z) &&
@@ -379,19 +418,25 @@ var  Ru = 9,
         (this.lastTouch = -1e9),
         (this.sticks = { move: Wu(), aim: Wu(), super: Wu() }),
         (this.shots = []),
+        (this.skillActions = []),
+        (this.skillKeys = new Set()),
+        (this.skillPointers = new Map()),
         (this.attackControl = aControl || null));
-      let n = new Set([`Space`, `KeyE`]);
+      let n = new Set([`Space`]);
       (window.addEventListener(`keydown`, (e) => {
         if (e.repeat || (e.target && (e.target.tagName === `INPUT` || e.target.tagName === `SELECT`))) return;
         let t = Uu(e);
         (this.keys.add(t),
           n.has(t) && ((this.superHeld = !0), e.preventDefault()),
+          (t === `KeyQ` || t === `Digit1`) && (this.skillActions.push({ skill: 1, phase: `press` }), e.preventDefault()),
+          (t === `KeyE` || t === `Digit2`) && (this.skillKeys.add(t), this.skillActions.push({ skill: 2, phase: `press` }), e.preventDefault()),
           (t === `ShiftLeft` || t === `ShiftRight`) && ((this.flickerPressed = !0), e.preventDefault()),
           t.startsWith(`Arrow`) && e.preventDefault());
       }),
         window.addEventListener(`keyup`, (e) => {
           let t = Uu(e);
-          (this.keys.delete(t), n.has(t) && this.superHeld && ((this.superHeld = !1), (this.superReleased = !0)));
+          (this.keys.delete(t), n.has(t) && this.superHeld && ((this.superHeld = !1), (this.superReleased = !0)),
+            this.skillKeys.has(t) && (this.skillKeys.delete(t), this.skillActions.push({ skill: 2, phase: `release` })));
         }),
         window.addEventListener(`blur`, () => {
           (this.keys.clear(), this.cancelActions());
@@ -522,7 +567,22 @@ var  Ru = 9,
       let e = this.fireReleasedDuration;
       return ((this.fireReleasedDuration = null), e);
     }
+    triggerSkill(skill, phase = `press`, aimShot = null) {
+      if (skill !== 1 && skill !== 2) return;
+      this.skillActions.push({ skill, phase, aimShot });
+    }
+    takeSkillActions() {
+      if (this.skillActions.length === 0) return this.skillActions;
+      const actions = this.skillActions;
+      this.skillActions = [];
+      return actions;
+    }
     cancelActions() {
+      for (const skill of this.skillKeys) this.skillActions.push({ skill: 2, phase: `cancel` });
+      for (const pointer of this.skillPointers.values())
+        if (pointer.skill === 2 && pointer.chargeStarted) this.skillActions.push({ skill: 2, phase: `cancel` });
+      this.skillKeys.clear();
+      this.skillPointers.clear();
       (this.keys.clear(),
         (this.fire = !1),
         (this.fireStartedAt = 0),
@@ -530,7 +590,8 @@ var  Ru = 9,
         (this.superHeld = !1),
         (this.superReleased = !1),
         (this.flickerPressed = !1),
-        (this.shots.length = 0));
+        (this.shots.length = 0),
+        (this.skillActions = this.skillActions.filter((action) => action.phase === `cancel`)));
       for (let e of Object.values(this.sticks)) this.resetStick(e);
     }
     takeShots() {
@@ -1030,6 +1091,7 @@ var  Ru = 9,
       this.syncItemButton(a, 0);
       this.syncItemButton(a, 1);
       this.syncFlickerButton(a);
+      this.syncSkillButtons(a);
       if (o !== this.lastSuper) {
         this.lastSuper = o;
         let e = $(`super`);
@@ -1078,13 +1140,75 @@ var  Ru = 9,
             : `quality: auto  (night frame ${t.perf.benchMs ? t.perf.benchMs.toFixed(1) : `?`} ms at startup)`);
       }
     }
+    syncSkillButtons(player) {
+      const actions = $(`action-cluster`);
+      const hasSkills = !!player?.def?.skills?.length;
+      actions.classList.toggle(`has-skills`, hasSkills);
+      $(`skill-hint`).hidden = !hasSkills;
+      const skills = player?.def?.skills || [];
+      const cooldowns = player?.skillCooldowns || [0, 0];
+      const charging = player?.skill2Charging === !0 || !!player?.skill2Charge;
+      const chargeSkill = player?.def?.id === `sukuna` && charging;
+      for (let index = 0; index < 2; index++) {
+        const button = $(`skill-action-${index + 1}`);
+        const definition = skills[index];
+        const remaining = Math.max(0, cooldowns[index] || 0);
+        const locked = !player?.alive || this.game.state !== `playing` || this.game.paused || (player.spawnT || 0) > 0 || (player.hardCCT || 0) > 0 || !!player.burst;
+        const activeCharge = index === 1 && chargeSkill;
+        const ready = !!definition && remaining <= 0 && !locked && !activeCharge;
+        let label = definition?.shortName || `SKILL ${index + 1}`;
+        let stateLabel = `READY`;
+        if (activeCharge) {
+          const elapsed = Number.isFinite(player.skill2ChargeT)
+            ? player.skill2ChargeT
+            : player.skill2Charge
+              ? Math.max(0, this.game.matchTime - player.skill2Charge.startedAt)
+              : 0;
+          stateLabel = `${Math.min(100, Math.round(elapsed / Math.max(0.1, definition.chargeTime || 1) * 100))}%`;
+        } else if (remaining > 0) stateLabel = `${remaining.toFixed(1)}s`;
+        else if (locked) stateLabel = `WAIT`;
+        button.disabled = !definition || locked || (remaining > 0 && !activeCharge);
+        button.classList.toggle(`ready`, ready);
+        button.classList.toggle(`charging`, activeCharge);
+        button.classList.toggle(`cooldown`, !!definition && remaining > 0 && !activeCharge);
+        button.classList.toggle(`waiting`, !!definition && locked && remaining <= 0 && !activeCharge);
+        button.dataset.character = player?.def?.id || ``;
+        button.dataset.skill = String(index + 1);
+        button.querySelector(`i`).textContent = player?.def?.id === `gojo`
+          ? index === 0 ? `◉` : `✹`
+          : player?.def?.id === `sukuna`
+            ? index === 0 ? `╱` : `♨`
+            : index === 0 ? `✦` : `✧`;
+        button.style.setProperty(`--skill-progress`, definition ? String(Math.max(0, Math.min(1, 1 - remaining / Math.max(0.1, definition.cooldown || 1)))) : `0`);
+        button.style.setProperty(`--charge`, activeCharge
+          ? String(Math.min(1, (player.skill2ChargeT || 0) / Math.max(0.1, definition.chargeTime || 1)))
+          : `0`);
+        button.querySelector(`b`).textContent = label;
+        button.querySelector(`.skill-state`).textContent = activeCharge ? `CHARGE ${stateLabel}` : stateLabel;
+        const description = definition ? `${definition.name}. ${activeCharge ? `Charging ${stateLabel}` : remaining > 0 ? `Ready in ${remaining.toFixed(1)} seconds` : locked ? `Waiting for the current action to finish` : `Ready`}` : `Unavailable`;
+        button.setAttribute(`aria-label`, `Skill ${index + 1}: ${description}`);
+        button.title = description;
+      }
+      const status = $(`character-status`);
+      if (player?.def?.id === `gojo`) {
+        const remaining = Number.isFinite(player.gojoBarrierRemaining)
+          ? player.gojoBarrierRemaining
+          : Math.max(0, (player.gojoBarrierReadyAt || 0) - this.game.matchTime);
+        status.hidden = !1;
+        status.textContent = player.gojoBarrier ? `BARRIER READY · 1 HIT` : `BARRIER · ${remaining.toFixed(1)}s`;
+        status.classList.toggle(`barrier-ready`, player.gojoBarrier === !0);
+      } else {
+        status.hidden = !0;
+        status.classList.remove(`barrier-ready`);
+      }
+    }
     syncItemButton(player, slot = 0) {
       slot = slot === 1 ? 1 : 0;
       let suffix = slot === 1 ? `-2` : ``,
         button = $(`item-action${suffix}`),
         item = player?.heldItems?.[slot] || (slot === 0 ? player?.heldItem : null) || null,
         canUse = !!item && this.game.state === `playing` && !this.game.paused && player.canUseHeldItem(slot),
-        isFocusAmmo = item === `ammo` && [`ello`, `syafiah`].includes(player?.def?.id),
+        isFocusAmmo = item === `ammo` && [`ello`, `syafiah`, `gojo`].includes(player?.def?.id),
         signature = `${player?.def?.id || ``}:${item || ``}:${+canUse}:${this.touch ? `touch` : `keys`}`;
       if (signature === this.lastItemUi[slot]) return;
       this.lastItemUi[slot] = signature;

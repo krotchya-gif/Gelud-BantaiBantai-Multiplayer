@@ -29,5 +29,11 @@ export default defineConfig({
     outDir: 'dist',
     emptyOutDir: true,
     target: 'es2022',
+    rolldownOptions: {
+      input: {
+        main: fileURLToPath(new URL('./index.html', import.meta.url)),
+        studio: fileURLToPath(new URL('./character-studio.html', import.meta.url)),
+      },
+    },
   },
 });

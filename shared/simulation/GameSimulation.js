@@ -3,7 +3,7 @@ import { MapCollision } from '../maps/MapCollision.js';
 import { characterMaxAmmo, characterUsesAmmo, getCharacterDef } from '../data/characters.js';
 import { createSimulationState } from './SimulationState.js';
 import { stepMovement } from './MovementSystem.js';
-import { beginAttack, releaseAttack, resolveIaido, stepAreaEffects, stepBursts, stepItems, stepProjectiles, useFlicker, useItem, useSuper, applyDamage } from './CombatSystem.js';
+import { beginAttack, releaseAttack, resolveIaido, stepAreaEffects, stepBursts, stepCharacterEffects, stepItems, stepLeaps, stepProjectiles, useFlicker, useItem, useSkill, useSuper, applyDamage } from './CombatSystem.js';
 
 export class GameSimulation {
   constructor(options = {}) {
@@ -18,6 +18,7 @@ export class GameSimulation {
   stepWeaponState(dt) {
     for (const player of this.state.players.values()) {
       player.attackCooldown = Math.max(0, player.attackCooldown - dt);
+      player.skillCooldowns = (player.skillCooldowns || [0, 0]).map((remaining) => Math.max(0, remaining - dt));
       if (player.comboResetT > 0) {
         player.comboResetT = Math.max(0, player.comboResetT - dt);
         if (player.comboResetT === 0) player.comboStep = 0;
@@ -75,6 +76,10 @@ export class GameSimulation {
     return useSuper(this.state, playerId, payload);
   }
 
+  skill(playerId, payload) {
+    return useSkill(this.state, playerId, payload);
+  }
+
   item(playerId, slot = 0) {
     return useItem(this.state, playerId, slot);
   }
@@ -97,6 +102,12 @@ export class GameSimulation {
       const wasParrying = player.parryT > 0;
       player.parryT = Math.max(0, (player.parryT || 0) - dt);
       player.flickerInvulnT = Math.max(0, (player.flickerInvulnT || 0) - dt);
+      player.hardCCT = Math.max(0, (player.hardCCT || 0) - dt);
+      player.hardCCRecoveryT = Math.max(0, (player.hardCCRecoveryT || 0) - dt);
+      if (!player.alive && player.skill2Charge) {
+        player.skill2Charge = null;
+        this.state.events.push({ type: 'SKILL_CHARGE_CANCEL', ownerId: player.id, skill: 2 });
+      }
       if (player.parryT === 0 && player.iaidoState && player.alive && (wasParrying || player.iaidoEmpowered)) resolveIaido(this.state, player);
       if (player.alive && player.hp < player.maxHp && this.state.match.elapsed - player.lastCombat > 3) {
         player.regenT += dt;
@@ -114,8 +125,10 @@ export class GameSimulation {
       if (nextInput) player.input = nextInput;
     }
     stepMovement(this.state, dt, this.collision);
+    stepLeaps(this.state, dt);
     stepProjectiles(this.state, dt);
     stepAreaEffects(this.state, dt);
+    stepCharacterEffects(this.state, dt);
     stepItems(this.state, dt);
     this.applyHazards(dt);
     this.stepTimedTraps(dt);
@@ -216,9 +229,21 @@ export class GameSimulation {
       this.state.nextSpawnIndex += 1;
       player.x = point.x; player.z = point.z; player.hp = player.maxHp; player.alive = true;
       player.spawnProtectionT = this.state.match.spawnProtection; player.deadT = 0; player.heldItems = [null, null]; player.heldItem = null; player.shieldT = 0; player.speedBoostT = 0; player.itemSpeedT = 0; player.slowT = 0;
-      player.superCharge = 0; player.ammo = characterMaxAmmo(player.characterId); player.reloadT = 0; player.attackCooldown = 0; player.burstT = 0; player.burstState = null; player.comboStep = 0; player.comboResetT = 0; player.iaidoState = null; player.iaidoEmpowered = false; player.flickerInvulnT = 0; player.flickerState = null;
+      player.superCharge = 0; player.ammo = characterUsesAmmo(player.characterId) ? characterMaxAmmo(player.characterId) : 0; player.reloadT = 0; player.attackCooldown = 0; player.burstT = 0; player.burstState = null; player.comboStep = 0; player.comboResetT = 0; player.iaidoState = null; player.iaidoEmpowered = false; player.flickerInvulnT = 0; player.flickerState = null;
       player.velX = 0; player.velZ = 0; player.input.moveX = 0; player.input.moveZ = 0; player.lastCombat = this.state.match.elapsed;
       player.chargeStartedAt = null;
+      player.skill2Charge = null;
+      player.hardCCT = 0;
+      player.hardCCRecoveryT = 0;
+      player.airborneT = 0;
+      player.leapState = null;
+      player.slowEffects?.clear();
+      player.bleeds?.clear();
+      player.burns?.clear();
+      player.sukunaBasicHits?.clear();
+      player.sukunaRushT = 0;
+      player.gojoBarrier = false;
+      player.gojoBarrierReadyAt = this.state.match.elapsed + 10;
       this.state.events.push({ type: 'RESPAWN', playerId: player.id, x: player.x, z: player.z });
     }
   }

@@ -4,6 +4,18 @@ import { normalize2 } from '../utils/math.js';
 export function stepMovement(state, dt, collision) {
   for (const player of state.players.values()) {
     if (!player.alive) continue;
+    if (player.hardCCT > 0) {
+      player.velX = 0; player.velZ = 0;
+      player.lastProcessedInputSeq = player.input.seq;
+      decrementMovementTimers(player, dt);
+      continue;
+    }
+    if (player.airborneT > 0) {
+      player.velX = 0; player.velZ = 0;
+      player.lastProcessedInputSeq = player.input.seq;
+      decrementMovementTimers(player, dt);
+      continue;
+    }
     if (player.flickerState) {
       const flicker = player.flickerState;
       flicker.t += dt;
@@ -38,9 +50,11 @@ export function stepMovement(state, dt, collision) {
     else player.stationaryT = 0;
     if (character.terrainAffinity?.type === 'bush' && surface === 'bush') speed *= character.terrainAffinity.moveMultiplier;
     if (surface === 'mud') speed *= gameplay.mudMoveMultiplier ?? 1;
-    if (player.itemSpeedT > 0) speed *= 1.35;
-    if (player.speedBoostT > 0) speed *= 1.15;
-    if (player.slowT > 0) speed *= 0.85;
+    const bonus = Math.min(1.4, (player.itemSpeedT > 0 ? 1.35 : 1) * (player.speedBoostT > 0 ? 1.15 : 1) * (player.sukunaRushT > 0 ? 1.1 : 1));
+    speed *= bonus;
+    const statusSlow = Math.min(1, ...(player.slowEffects ? [...player.slowEffects.values()].map((effect) => effect.multiplier) : [1]));
+    if (player.slowT > 0) speed *= Math.min(0.85, statusSlow);
+    else speed *= statusSlow;
     if (player.chargeStartedAt != null && player.characterId === 'syafiah') speed *= 0.88;
     if (player.burstT > 0 && player.characterId !== 'ello') speed *= 0.82;
     if (surface === 'ice') {

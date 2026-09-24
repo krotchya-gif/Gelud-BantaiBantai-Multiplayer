@@ -18,10 +18,10 @@ Input client
 
 - `src/bootstrap.js` memilih WebGPU atau WebGL2, lalu memuat engine klasik.
 - `src/multiplayer/` berisi WebSocket client, lobby, prediction, reconciliation, dan snapshot buffer.
-- `public/engine/` adalah script klasik global dengan urutan load yang sensitif: Three.js, roster, pipeline, map, model, brawler, combat, effects, interfaces, lalu main.
+- `public/engine/` adalah script klasik global dengan urutan load yang sensitif: Three.js, roster, pipeline, map, model, model sorcerer, brawler, combat, effects, interfaces, lalu main.
 - `shared/` adalah aturan yang dipakai server dan client: karakter, protocol, map collision, dan simulasi authoritative.
 - `server/` menangani room, koneksi WebSocket, match runner, snapshot, dan bot.
-- `tests/` berisi unit/integration tests; `scripts/verify-character-models.mjs` memeriksa delapan rig karakter.
+- `tests/` berisi unit/integration tests; `scripts/verify-character-models.mjs` memeriksa 10 rig gameplay dan dua design rig.
 
 ## Invarian multiplayer
 
@@ -33,11 +33,19 @@ Input client
 - `player.facing`/aim adalah arah gameplay. Rotasi visual root pemain remote dapat mengikuti velocity saat berjalan; jangan mencampur arah aim dan arah gerak pada perhitungan serangan.
 - Vektor aim `(0, 0)` dari touch tap atau client lama harus menggunakan arah aim/facing terakhir. Fallback ini harus tetap berlaku di client network session dan `shared/simulation/CombatSystem.js` agar projectile, melee, dan charge tidak kehilangan arah.
 - Protocol menggunakan JSON WebSocket native pada `/ws`, protocol version saat ini `1`, dan kapasitas room maksimum 8 pemain. Perubahan payload harus memperbarui schema dan test terkait.
+- `shared/data/characters.js` adalah sumber stat/serangan/skill untuk server; padanannya di `public/engine/character-roster.js` harus sama. Gojo dan Sukuna wajib tetap dapat dipilih di solo dan lobby, serta snapshot/event harus membawa cooldown, charge, Barrier, dan status yang diperlukan renderer.
+- Pertahankan nama yang disepakati: Gojo memakai `Limitless Strike`, `Cursed Technique Lapse - Blue`, `Cursed Technique Reversal - Red`, `Infinity Barrier`, dan `Domain Expansion - Infinite Void`; Sukuna memakai `Cleave`, `Dismantle`, `Fuga - Kamino / Flame Arrow`, `Reverse Cursed Technique`, dan `Domain Expansion - Malevolent Shrine`. Jangan mengganti nama UI dengan alias terjemahan tanpa permintaan.
+- Skill Blue Gojo memiliki durasi authoritative 1,4 detik. Solo, snapshot multiplayer, dan marker renderer harus mengakhiri tarikan serta mem-fade orb pada batas timer yang sama; timer area tidak boleh ditimpa timer Super.
+- Gojo Barrier menyerap satu damage instance atau hard CC yang berasal dari serangan pemain. Efek CC murni, seperti freeze Domain, tetap menghabiskan Barrier; hazard map tanpa attacker tidak menghabiskannya. Pertahankan aturan yang sama di `shared/simulation/CombatSystem.js` dan solo `Brawler.applyHardCC`/`takeDamage`.
+- `airborneT` dan fase leap Titan adalah state authoritative. Selama di udara, movement/action terkunci dan damage/hard CC tidak mengenai Titan; damage Super dan ledakan baru diproses saat mendarat. Snapshot dan event dash harus menjaga invulnerability serta animasi jaringan selaras dengan solo, termasuk durasi low-gravity.
 
 ## Invarian kemampuan, item, trap, dan kontrol
 
 - Flicker memiliki cooldown authoritative yang sama di solo dan multiplayer. HUD touch dan desktop harus menampilkan hitungan sisa cooldown serta state siap; ketika charge penuh tetapi spawn protection atau aksi lain mengunci penggunaan, tampilkan state menunggu. Input keyboard `Shift` dan tombol touch memanggil aksi yang sama.
+- Pemain airborne tidak boleh digeser, terkena damage/CC, mengambil item, atau menjadi target projectile/area; jangan menandai projectile sebagai sudah mengenai pemain udara. Terapkan perlindungan dan timer landing pada solo dan simulasi authoritative yang sama.
 - Kontrol gameplay mobile memakai satu layout baku: joystick gerak di kiri bawah; cluster serangan/skill di kanan bawah dengan tiga posisi skill melengkung di sekitar serangan utama; `Super` menempati posisi lengkung paling bawah. Baris utility berisi `Item 1`, `Item 2`, lalu `Flicker`. Posisi ini menjadi pola untuk skill/item baru; jangan merombak HUD lain ketika mengubah cluster tersebut.
+- Saat match touch, jangan tampilkan petunjuk aim yang melayang di atas cluster serangan. Pickup dan pemakaian item memberi feedback lewat slot, efek visual, dan audio tanpa toast bawah yang menutup tombol utility.
+- Gojo/Sukuna menampilkan dua tombol skill di desktop dan touch dengan warna karakter, nama pendek, state siap/wait, dan cooldown/charge. Tombol touch dapat di-drag untuk menentukan arah; guide hanya muncul selama drag dan mengikuti bentuk/jangkauan skill. Gojo memegang Blue dan Red yang bercahaya, Sukuna membawa api pada kedua tangan; pose cast dan efek harus tetap sama di solo dan multiplayer.
 - Item 1 dan Item 2 adalah slot inventori terpisah. Pickup, konsumsi, UI, prediction, bot bila berlaku, schema, dan snapshot harus mempertahankan isi serta aksi tiap slot secara konsisten; kontrol legacy boleh memilih slot pertama sebagai default.
 - Trap berkala berjalan di simulasi authoritative yang dipakai solo dan server. Siklus dimulai tiap 60 detik, memilih lokasi walkable secara seeded dari `matchSeed` dan `mapSeed`, memberi telegraph sebelum aktif, lalu menghasilkan ledakan, burning, atau gas beracun. Render client hanya memvisualisasikan state/event simulasi; ia tidak menentukan hit atau damage.
 - Solo Deathmatch membatasi pemakaian satu karakter maksimal oleh dua bot dalam satu match. Pemilihan roster bot harus tetap deterministik bila seed tersedia dan memakai karakter yang ada di shared roster.
@@ -47,6 +55,8 @@ Input client
 Sebagian besar asset adalah geometry/material procedural di `public/engine/`, bukan file model eksternal. Build Vite menyalin seluruh `public/engine/*.js` ke `dist/engine/` dan service worker mem-precache hasil build.
 
 - Roster visual karakter dibuat oleh `character-models.js`/`character-roster.js` dan dipakai solo maupun multiplayer melalui class brawler yang sama.
+- `sorcerer-models.js` dimuat sesudah `character-models.js` dan sebelum `brawlers.js`; builder Gojo/Sukuna dipakai oleh class yang sama di solo dan multiplayer. Verifikasi geometri, pose, material cache, dan parity data lewat `npm run test:characters`.
+- Master ikon transparan adalah `output/imagegen/bakuhantam-icon-transparent.png`; varian PWA ada di `public/icons/`. Pertahankan alpha transparan pada icon, Apple touch icon, dan maskable icon; versi maskable harus punya padding aman.
 - Geometry projectile dan material item multiplayer harus memakai cache atau asset combat solo bila tersedia. Hindari membuat geometry/material baru setiap snapshot atau setiap projectile.
 - Projectile network memakai pooling. Saat menghapus projectile, sembunyikan dan masukkan ke pool; dispose hanya geometry/material yang memang dimiliki pool, bukan asset cache bersama.
 - Dalam engine global yang sudah diminify, `H` adalah `Vector3` dan `J` adalah `Color`. Efek visual yang membutuhkan warna harus menerima `J` atau object Color yang valid.
@@ -70,12 +80,14 @@ Integration test lobby perlu bind `127.0.0.1`. Jika test gagal dengan `listen EP
 npm test -- --run tests/integration/lobby.test.js
 ```
 
-Pada project ini integration test sebelumnya memang gagal di sandbox, lalu lulus setelah dijalankan dengan izin bind localhost. Dengan bind diizinkan, suite aktual terakhir adalah 38 test lulus. Catat kedua kondisi tersebut saat melaporkan hasil test.
+Pada project ini integration test sebelumnya pernah gagal di sandbox karena `listen EPERM`, lalu lulus setelah bind localhost diizinkan. Jangan anggap kegagalan sebelum assertion sebagai bug simulasi; catat kondisi sandbox dan hasil sesudah bind bila test lobby dijalankan. Verifikasi terbaru pada 25 September 2026 lulus: `npm run build`, `npm run test:characters`, `npm test -- --run` (23 file/99 test), dan `git diff --check`. Verifier rig mencakup 10 rig gameplay dan dua design rig, paritas roster Gojo/Sukuna, durasi Blue solo, orb multiplayer, warna tangan, serta animasi. Build terbaru berisi 27 file/2.770.692 byte; bundle WebGPU 781,37 kB (212,55 kB gzip), aplikasi 33,97 kB (11,92 kB gzip). Smoke test browser build bersih memastikan Gojo/Sukuna muncul di roster solo, tombol skill desktop Gojo terlihat, dan Blue masuk cooldown setelah dipakai. Regression gameplay juga memastikan Titan tidak menerima damage atau freeze Domain selama airborne, durasi mengikuti low-gravity, dan Super meledak saat mendarat. Uji multiplayer dua perangkat, touch langsung, dan balance playtest tetap perlu dilakukan.
 
 ## Aturan perubahan
 
 - Pertahankan perubahan pengguna yang sudah ada di working tree. Jangan memakai reset/checkout destruktif untuk membersihkan repository.
 - Untuk perubahan protocol atau simulasi, tambahkan regression test yang menguji perilaku authoritative, bukan hanya bentuk implementasinya.
+- Perubahan Gojo/Sukuna harus menjaga nama serta angka roster solo/shared, lalu menguji efek skill/status melalui simulasi authoritative. Uji minimal Barrier versus damage/CC, pull satu kali per cast dan berakhir tepat setelah 1,4 detik, slash yang menembus maksimal tiga target, serta warna/charge/release Fuga.
+- Perubahan leap harus menguji durasi normal dan low-gravity, movement/action lock, immunity damage/CC/area, dan damage ledakan saat mendarat; event `SUPER_DASH` dan snapshot `airborneT` wajib dicerminkan client.
 - Untuk perubahan renderer multiplayer, periksa mode solo dan multiplayer, desktop serta touch, projectile, item, respawn, dan reconnect.
 - Untuk perubahan cluster kontrol, pertahankan target sentuh yang cukup besar, safe-area inset, mode left-handed, dan event multi-touch tanpa konflik antara joystick, Super, dua slot item, dan Flicker.
 - Jalankan `git diff --check`, test yang relevan, build, dan `npm run test:characters` setelah perubahan yang menyentuh engine atau multiplayer.

@@ -201,6 +201,73 @@ var ld = class {
           this.useFlicker();
         });
       })(),
+      (() => {
+        for (const [buttonId, skill] of [[`skill-action-1`, 1], [`skill-action-2`, 2]]) {
+          const button = $(buttonId);
+          let pointerActivationAt = 0;
+          button.addEventListener(`pointerdown`, (event) => {
+            if (button.disabled) return;
+            event.preventDefault();
+            event.stopPropagation();
+            if (event.pointerType === `touch`) {
+              this.input.setTouchMode(!0);
+              this.input.lastTouch = performance.now();
+            }
+            const chargeStarted = this.player?.def?.id === `sukuna` && skill === 2;
+            const pointer = {
+              skill, originX: event.clientX, originY: event.clientY,
+              x: 0, y: 0, mag: 0, moved: false, chargeStarted,
+              startedAt: performance.now(),
+            };
+            this.input.skillPointers.set(event.pointerId, pointer);
+            try { button.setPointerCapture(event.pointerId); } catch {}
+            if (chargeStarted) this.input.triggerSkill(skill, `press`);
+          });
+          window.addEventListener(`pointermove`, (event) => {
+            const pointer = this.input.skillPointers.get(event.pointerId);
+            if (!pointer) return;
+            const dx = event.clientX - pointer.originX;
+            const dy = event.clientY - pointer.originY;
+            const distance = Math.hypot(dx, dy);
+            if (distance > 10) pointer.moved = true;
+            const mag = Math.min(1, distance / 58);
+            pointer.x = distance > 0 ? dx / distance * mag : 0;
+            pointer.y = distance > 0 ? dy / distance * mag : 0;
+            pointer.mag = mag;
+          });
+          window.addEventListener(`pointerup`, (event) => {
+            const pointer = this.input.skillPointers.get(event.pointerId);
+            if (!pointer) return;
+            this.input.skillPointers.delete(event.pointerId);
+            if (event.pointerType === `touch`) this.input.lastTouch = performance.now();
+            pointerActivationAt = performance.now();
+            const shot = pointer.moved ? {
+              x: pointer.x, y: pointer.y, mag: pointer.mag, tap: false,
+              chargeStarted: pointer.chargeStarted, startedAt: pointer.startedAt,
+            } : null;
+            this.input.triggerSkill(pointer.skill, pointer.chargeStarted ? `release` : `press`, shot);
+          });
+          window.addEventListener(`pointercancel`, (event) => {
+            const pointer = this.input.skillPointers.get(event.pointerId);
+            if (!pointer) return;
+            this.input.skillPointers.delete(event.pointerId);
+            if (event.pointerType === `touch`) this.input.lastTouch = performance.now();
+            if (pointer.chargeStarted) this.input.triggerSkill(2, `cancel`);
+          });
+          button.addEventListener(`click`, (event) => {
+            const generatedByPointer = event.detail > 0 && pointerActivationAt > 0 && performance.now() - pointerActivationAt < 800;
+            if (generatedByPointer) {
+              pointerActivationAt = 0;
+              event.preventDefault();
+              event.stopPropagation();
+              return;
+            }
+            if (button.disabled) return;
+            this.input.triggerSkill(skill, `press`);
+            if (this.player?.def?.id === `sukuna` && skill === 2) this.input.triggerSkill(2, `release`);
+          });
+        }
+      })(),
       this.toMenu());
     let s = this.params.get(`auto`);
     (s && Bc[s] && this.startMatch(s),
@@ -433,7 +500,7 @@ var ld = class {
   useFlicker() {
     const player = this.player;
     if (this.networkSession) {
-      if (this.paused || this.state !== `playing` || !player?.alive || player.spawnT > 0 || player.burst || player.flicker || player.networkFlicker || player.dash || player.leap || !player.flickerReady) return !1;
+      if (this.paused || this.state !== `playing` || !player?.alive || player.spawnT > 0 || player.burst || player.flicker || player.networkFlicker || player.dash || player.airborne || !player.flickerReady) return !1;
       const axis = this.input.axis();
       const aim = this.networkAimDirection(player, axis) || { x: Math.sin(player.facing), z: Math.cos(player.facing) };
       const length = Math.hypot(axis.x, axis.z);
@@ -530,6 +597,7 @@ var ld = class {
     this.networkAreaPulse = new Map();
     this.networkAreaMarkers = new Map();
     this.networkArrowFalls = [];
+    this.networkBrokenCover = new Set();
     this.networkTrapMarkers = new Map();
     if (!session.__gameBound) {
       session.__gameBound = true;
@@ -582,6 +650,13 @@ var ld = class {
   networkAimDirection(player, axis = null) {
     if (!player) return null;
     if (this.input.touchMode) {
+      const skillPointer = [...this.input.skillPointers.values()].find((pointer) => pointer.moved);
+      if (skillPointer) {
+        const definition = player.def.skills?.[skillPointer.skill - 1];
+        const skillAim = definition ? this.stickAim(skillPointer, definition) : null;
+        if (skillAim) this.networkAim = { x: skillAim.dx, z: skillAim.dz };
+        return this.networkAim || { x: Math.sin(player.facing), z: Math.cos(player.facing) };
+      }
       const stick = this.input.sticks.aim;
       if (stick.id !== null && stick.mag > 0.22) {
         const length = Math.hypot(stick.x, stick.y) || 1;
@@ -607,6 +682,7 @@ var ld = class {
   }
   updateNetworkPresentation(entity, dt, moving) {
     if (!entity) return;
+    entity.networkLeapT = Math.max(0, (entity.networkLeapT || 0) - dt);
     entity.spawnT = Math.max(0, (entity.spawnT || 0) - dt);
     entity.parryT = Math.max(0, (entity.parryT || 0) - dt);
     entity.flickerInvulnT = Math.max(0, (entity.flickerInvulnT || 0) - dt);
@@ -615,7 +691,9 @@ var ld = class {
     entity.punch[1] = nl(entity.punch[1] || 0, 0, 16, dt);
     entity.squash = nl(entity.squash || 0, 0, 12, dt);
     if (entity.slashAnim) entity.slashAnim.t += dt;
-    if (entity.networkCharging) entity.chargeLevel = Math.min(1, (entity.chargeLevel || 0) + dt / 0.7);
+    if (entity.def.id === `sukuna` && entity.skill2Charging)
+      entity.chargeLevel = $c((entity.skill2ChargeT || 0) / Math.max(0.1, entity.def.skills?.[1]?.chargeTime || 1), 0, 1);
+    else if (entity.networkCharging) entity.chargeLevel = Math.min(1, (entity.chargeLevel || 0) + dt / 0.7);
     else entity.chargeLevel = nl(entity.chargeLevel || 0, 0, 18, dt);
     if (entity.networkFlicker) {
       const flicker = entity.networkFlicker;
@@ -648,7 +726,7 @@ var ld = class {
         } else entity.squash = 1.1;
       }
     }
-    entity.isCharging = entity.networkCharging === true;
+    entity.isCharging = entity.networkCharging === true || entity.skill2Charging === true;
     entity.animate(dt, moving && entity.alive);
     if (entity.networkDash?.leap) entity.model.body.rotation.x = $c(entity.networkDash.t / entity.networkDash.duration, 0, 1) * Math.PI * 2;
   }
@@ -717,6 +795,37 @@ var ld = class {
             this.networkChargeActive = false;
             player.networkCharging = false;
           } else this.networkSession.sendAttackStart(shotAim.dx, shotAim.dz);
+        }
+      }
+      for (const action of this.input.takeSkillActions()) {
+        const chargedSkill = player.def.id === `sukuna` && action.skill === 2;
+        const phase = action.phase === `press`
+          ? chargedSkill ? `start` : `activate`
+          : chargedSkill && (action.phase === `release` || action.phase === `cancel`) ? action.phase : null;
+        if (!phase) continue;
+        const definition = player.def.skills?.[action.skill - 1];
+        const aimed = action.aimShot && definition
+          ? this.stickAim(action.aimShot, definition)
+          : this.input.touchMode && definition
+            ? this.autoAim(definition)
+            : null;
+        const direction = aimed ? { x: aimed.dx, z: aimed.dz } : aim || { x: Math.sin(player.facing), z: Math.cos(player.facing) };
+        const range = definition?.range || 0;
+        this.networkAim = { x: direction.x, z: direction.z };
+        this.networkSession.sendSkill(
+          action.skill,
+          phase,
+          direction.x,
+          direction.z,
+          aimed?.x ?? player.x + direction.x * range,
+          aimed?.z ?? player.z + direction.z * range,
+        );
+        if (chargedSkill && action.phase === `press`) {
+          player.skill2Charging = !0;
+          player.skill2ChargeT = 0;
+        } else if (chargedSkill) {
+          player.skill2Charging = !1;
+          player.skill2ChargeT = 0;
         }
       }
       if (!this.input.touchMode) {
@@ -792,6 +901,7 @@ var ld = class {
         entity.shieldT = remote.shieldT || 0;
         entity.parryT = remote.parryT || 0;
         entity.slowT = remote.slowT || 0;
+        entity.slowEffects = new Map((remote.slowEffects || []).map(({ sourceId, multiplier, remaining }) => [sourceId, { multiplier, remaining }]));
         entity.itemSpeedT = remote.itemSpeedT || 0;
         entity.spawnT = remote.spawnProtectionT || 0;
         entity.ammo = Number.isFinite(remote.ammo) ? remote.ammo : entity.ammo;
@@ -802,9 +912,18 @@ var ld = class {
         entity.comboStep = remote.comboStep || 0;
         entity.burstT = remote.burstT || 0;
         entity.networkCharging = remote.charging === true;
+        entity.skillCooldowns = Array.isArray(remote.skillCooldowns) ? remote.skillCooldowns.slice(0, 2) : entity.skillCooldowns;
+        entity.skill2Charging = remote.skill2Charging === true;
+        entity.skill2ChargeT = remote.skill2ChargeT || 0;
+        entity.gojoBarrier = remote.gojoBarrier === true;
+        entity.gojoBarrierRemaining = remote.gojoBarrierRemaining || 0;
+        entity.hardCCT = remote.hardCCT || 0;
+        entity.networkLeapT = remote.airborneT || 0;
+        entity.sukunaRushT = remote.sukunaRushT || 0;
+        if (entity.networkDash?.leap && entity.networkLeapT > 0) entity.networkDash.duration = entity.networkDash.t + entity.networkLeapT;
         entity.root.visible = remote.alive && remote.connected !== false;
         const remoteMoving = entity.vel.lengthSq() > 0.2;
-        const remoteVisualFacing = remoteMoving && !entity.networkCharging && (entity.recoil || 0) < 0.18
+        const remoteVisualFacing = remoteMoving && !entity.networkCharging && !entity.skill2Charging && (entity.recoil || 0) < 0.18
           ? Math.atan2(entity.vel.x, entity.vel.y)
           : entity.facing;
         entity.root.rotation.y = remoteVisualFacing;
@@ -834,6 +953,7 @@ var ld = class {
           this.player.speedBoostT = local.speedBoostT || 0;
           this.player.itemSpeedT = local.itemSpeedT || 0;
           this.player.slowT = local.slowT || 0;
+          this.player.slowEffects = new Map((local.slowEffects || []).map(({ sourceId, multiplier, remaining }) => [sourceId, { multiplier, remaining }]));
           this.player.parryT = local.parryT || 0;
           this.player.ammo = Number.isFinite(local.ammo) ? local.ammo : this.player.ammo;
           this.player.reloadT = local.reloadT || 0;
@@ -843,7 +963,16 @@ var ld = class {
           this.player.comboStep = local.comboStep || 0;
           this.player.burstT = local.burstT || 0;
           this.player.networkCharging = local.charging === true;
-          this.player.isCharging = this.player.networkCharging;
+          this.player.isCharging = this.player.networkCharging || this.player.skill2Charging;
+          this.player.skillCooldowns = Array.isArray(local.skillCooldowns) ? local.skillCooldowns.slice(0, 2) : this.player.skillCooldowns;
+          this.player.skill2Charging = local.skill2Charging === true;
+          this.player.skill2ChargeT = local.skill2ChargeT || 0;
+          this.player.gojoBarrier = local.gojoBarrier === true;
+          this.player.gojoBarrierRemaining = local.gojoBarrierRemaining || 0;
+          this.player.hardCCT = local.hardCCT || 0;
+          this.player.networkLeapT = local.airborneT || 0;
+          this.player.sukunaRushT = local.sukunaRushT || 0;
+          if (this.player.networkDash?.leap && this.player.networkLeapT > 0) this.player.networkDash.duration = this.player.networkDash.t + this.player.networkLeapT;
           if (!local.alive) this.player.root.position.set(local.x, 0, local.z);
           this.focus.set(this.player.root.position.x, 0, this.player.root.position.z);
         }
@@ -851,6 +980,7 @@ var ld = class {
       this.syncNetworkProjectiles(snapshot.projectiles || []);
       this.syncNetworkItems(snapshot.items || []);
       this.syncNetworkAreas(snapshot.areaEffects || []);
+      this.syncNetworkBrokenCover(snapshot.brokenCover || []);
       this.syncNetworkTraps(snapshot.traps || []);
       if (this.modeName !== `deathmatch`) this.gas.update(e, this.matchTime, false);
     }
@@ -960,10 +1090,12 @@ var ld = class {
       }
     } else if (event.type === `SUPER_DASH`) {
       if (entity) {
-        const duration = entity.def.id === `titan` ? entity.def.super.flight || 0.75 : entity.def.super.flight || 0.22;
+        const duration = event.duration || entity.def.super.flight || 0.22;
         const dx = event.toX - event.fromX; const dz = event.toZ - event.fromZ;
         const length = Math.hypot(dx, dz) || 1;
-        entity.networkDash = { ...event, dx: dx / length, dz: dz / length, t: 0, duration, leap: entity.def.super.kind === `leap` };
+        const leap = event.leap === true || (event.leap == null && entity.def.super.kind === `leap`);
+        entity.networkLeapT = leap ? duration : 0;
+        entity.networkDash = { ...event, dx: dx / length, dz: dz / length, t: 0, duration, leap };
         entity.recoil = 1; entity.squash = -0.35;
         this.effects.dust(event.fromX, event.fromZ, entity.def.id === `titan` ? 10 : 6, entity.def.id === `titan` ? 2.4 : 1.6);
         this.audio.play(entity.networkDash.leap ? `leap` : `shotBig`, event.fromX, event.fromZ);
@@ -984,20 +1116,88 @@ var ld = class {
       const z = Number.isFinite(event.targetZ) ? event.targetZ : event.z ?? entity?.z;
       if (Number.isFinite(x) && Number.isFinite(z)) {
         const color = new J(event.color || entity?.superColor || 0xd0a2ff);
-        if (event.type === `SUPER_ZONE`) this.ensureNetworkAreaMarker({ ...event, kind: `arrow-shower` });
+        if (event.type === `SUPER_ZONE`) this.ensureNetworkAreaMarker({ ...event, kind: event.kind || `arrow-shower` });
         else if (event.type === `SUPER_WAVE`) {
-          this.spawnNetworkArrowFalls(x, z, event.radius || 3.4);
-          this.effects.impact(x, 0.08, z, color, 18);
+          if (event.kind === `sukuna-zone`) {
+            this.effects.ring(x, z, event.radius || 4.5, color, 0.38, 2.4);
+            this.effects.impact(x, 0.08, z, color, 18);
+          } else {
+            this.spawnNetworkArrowFalls(x, z, event.radius || 3.4);
+            this.effects.impact(x, 0.08, z, color, 18);
+          }
           this.audio.play(`hit`, x, z);
         } else {
           this.effects.burst(x, 0.7, z, color, 14, 3);
           this.audio.play(`super`, entity?.x ?? x, entity?.z ?? z);
         }
       }
+    } else if (event.type === `SKILL_USED`) {
+      entity?.startSkillAnimation?.(event.skill);
+    } else if (event.type === `SKILL_ZONE`) {
+      this.ensureNetworkAreaMarker(event);
+      if (entity) {
+        entity.recoil = 0.9;
+        this.audio.play(`zap`, entity.x, entity.z);
+      }
+    } else if (event.type === `SKILL_SLASH`) {
+      const dx = event.toX - event.fromX;
+      const dz = event.toZ - event.fromZ;
+      const length = Math.hypot(dx, dz) || 1;
+      const color = new J(event.color || entity?.superColor || 0xe52d45);
+      this.effects.muzzle(event.fromX + dx / length * 0.35, 0.74, event.fromZ + dz / length * 0.35, dx / length, dz / length, color, 1.2);
+      this.effects.impact(event.toX, 0.08, event.toZ, color, 12);
+      if (entity) entity.recoil = 0.9;
+      this.audio.play(`shotBig`, event.fromX, event.fromZ);
+    } else if (event.type === `DOMAIN_ACTIVATED`) {
+      const color = new J(event.color || 0x617cff);
+      this.effects.flash(event.x, 0.82, event.z, color, 25, 8, 0.3);
+      this.effects.ring(event.x, event.z, event.radius || 3.8, color, 0.5, 2.5);
+      this.audio.play(`zap`, event.x, event.z);
+    } else if (event.type === `SKILL_CHARGE`) {
+      if (entity) {
+        entity.skill2Charging = true;
+        entity.skill2ChargeT = 0;
+        entity.networkSkillChargeStartedAt = this.elapsed;
+        entity.startSkillAnimation?.(2, event.duration || 1, true);
+      }
+    } else if (event.type === `SKILL_CHARGE_RELEASE` || event.type === `SKILL_CHARGE_CANCEL`) {
+      if (entity) {
+        entity.skill2Charging = false;
+        entity.skill2ChargeT = 0;
+        entity.recoil = event.type === `SKILL_CHARGE_RELEASE` ? 1 : entity.recoil;
+        if (event.type === `SKILL_CHARGE_RELEASE`) entity.startSkillAnimation?.(2, 0.48);
+        else entity.skillAnimation = null;
+      }
+    } else if (event.type === `HARD_CC`) {
+      const target = this.networkEntities.get(event.targetId);
+      if (target) target.applyHardCC(event.duration || 0.7, event.kind || `stun`);
+    } else if (event.type === `BARRIER_BLOCKED`) {
+      const target = this.networkEntities.get(event.targetId);
+      if (target) {
+        target.gojoBarrier = false;
+        target.gojoBarrierRemaining = 10;
+        this.effects.impact(target.x, 0.82, target.z, new J(0x4f79ff), 12);
+        this.audio.play(`zap`, target.x, target.z);
+      }
+    } else if (event.type === `BARRIER_READY`) {
+      const target = this.networkEntities.get(event.ownerId);
+      if (target) {
+        target.gojoBarrier = true;
+        this.effects.impact(target.x, 0.72, target.z, new J(0x4f79ff), 10);
+      }
+    } else if (event.type === `SUKUNA_PASSIVE`) {
+      if (entity) {
+        entity.sukunaRushT = event.speedDuration || 2;
+        this.effects.burst(entity.x, 0.8, entity.z, new J(0xe52d45), 9, 2.8);
+        this.hud.floatText(entity.x, 1.8, entity.z, `COMBAT DRIVE`, `power`);
+      }
+    } else if (event.type === `COVER_BROKEN`) {
+      const broken = this.world?.destroyTile(event.tileX, event.tileZ);
+      if (broken) this.effects.debris(broken.x, 0.6, broken.z, new J(0x877967), 6);
     } else if (event.type === `AREA_END`) {
       const marker = this.networkAreaMarkers?.get(event.id);
       if (marker) {
-        this.scene.remove(marker);
+        this.removeNetworkAreaMarker(marker);
         this.networkAreaMarkers.delete(event.id);
       }
     } else if (event.type === `TRAP_WARNING`) {
@@ -1109,21 +1309,68 @@ var ld = class {
       mesh.visible = false;
     }
   }
+  syncNetworkBrokenCover(tiles) {
+    if (!this.networkBrokenCover) this.networkBrokenCover = new Set();
+    for (const tile of tiles) {
+      if (!Number.isInteger(tile.tileX) || !Number.isInteger(tile.tileZ)) continue;
+      const key = tile.tileZ * 44 + tile.tileX;
+      if (this.networkBrokenCover.has(key)) continue;
+      this.networkBrokenCover.add(key);
+      const broken = this.world?.destroyTile(tile.tileX, tile.tileZ);
+      if (broken) this.effects.debris(broken.x, 0.6, broken.z, new J(0x877967), 5);
+    }
+  }
   ensureNetworkAreaMarker(area) {
-    if (!area?.id || area.kind !== `arrow-shower` || !this.networkAreaMarkers) return;
+    if (!area?.id || ![`arrow-shower`, `gojo-pull`, `gojo-domain`, `sukuna-zone`].includes(area.kind) || !this.networkAreaMarkers) return;
     let marker = this.networkAreaMarkers.get(area.id);
     if (!marker) {
       marker = new ut();
-      const disc = new Ln(this.combat.arrowShowerDiscGeometry, this.combat.arrowShowerDiscMaterial);
-      const ring = new Ln(this.combat.arrowShowerRingGeometry, this.combat.arrowShowerRingMaterial);
+      const discMaterial = this.combat.arrowShowerDiscMaterial.clone();
+      const ringMaterial = this.combat.arrowShowerRingMaterial.clone();
+      const color = area.color || (area.kind === `gojo-pull` || area.kind === `gojo-domain` ? 0x4777ff : area.kind === `sukuna-zone` ? 0xe52d45 : 0xffd17a);
+      discMaterial.color.set(color);
+      ringMaterial.color.set(color);
+      const disc = new Ln(this.combat.arrowShowerDiscGeometry, discMaterial);
+      const ring = new Ln(this.combat.arrowShowerRingGeometry, ringMaterial);
       disc.userData.noAO = ring.userData.noAO = marker.userData.noAO = true;
       disc.renderOrder = ring.renderOrder = marker.renderOrder = 3;
       marker.add(disc, ring);
+      marker.userData.areaDisc = disc;
+      marker.userData.areaRing = ring;
+      marker.userData.ownsAreaMaterials = true;
+      if (area.kind === `gojo-pull`) {
+        const orbMaterial = new Nr({
+          color: 0x8fbaff, emissive: color, emissiveIntensity: 2.8, roughness: 0.2,
+          metalness: 0.08, transparent: true, opacity: 1, depthWrite: false,
+        });
+        const orb = new Ln(this.combat.characterAreaOrbGeometry, orbMaterial);
+        orb.position.y = 0.76;
+        orb.userData.noAO = true;
+        marker.add(orb);
+        marker.userData.areaOrb = orb;
+      }
       this.scene.add(marker);
       this.networkAreaMarkers.set(area.id, marker);
     }
     marker.position.set(area.x, 0.055, area.z);
-    marker.scale.setScalar((area.radius || 3.4) / 3.4 * (1 + Math.sin(this.elapsed * 18) * 0.025));
+    const activated = area.kind === `gojo-pull` || area.activated === true || (Number.isFinite(area.warning) && area.warning <= 0);
+    if (marker.userData.areaDisc) marker.userData.areaDisc.material.opacity = activated ? 0.13 : 0.07 + Math.max(0, Math.sin(this.elapsed * 18)) * 0.08;
+    if (marker.userData.areaRing) marker.userData.areaRing.material.opacity = activated ? 0.82 : 0.55 + Math.max(0, Math.sin(this.elapsed * 18)) * 0.4;
+    marker.scale.setScalar((area.radius || 3.4) / 3.4 * (activated ? 1 + Math.sin(this.elapsed * 13) * 0.018 : 1));
+    if (marker.userData.areaOrb) {
+      const fade = $c((area.remaining ?? 1.4) / 0.22, 0, 1);
+      const orb = marker.userData.areaOrb;
+      orb.position.y = 0.76 + Math.sin(this.elapsed * 8) * 0.09;
+      orb.rotation.y = this.elapsed * 2.8;
+      orb.scale.setScalar((0.86 + Math.sin(this.elapsed * 11) * 0.12) * (0.72 + fade * 0.28));
+      orb.material.opacity = fade;
+    }
+  }
+  removeNetworkAreaMarker(marker) {
+    if (!marker) return;
+    this.scene.remove(marker);
+    if (marker.userData?.ownsAreaMaterials)
+      disposeRendererResources(marker.children.map((child) => child.material));
   }
   spawnNetworkArrowFalls(x, z, radius) {
     if (!this.networkArrowFalls) return;
@@ -1158,7 +1405,7 @@ var ld = class {
     const active = new Set();
     for (const area of areas) {
       active.add(area.id);
-      if (area.kind === `arrow-shower`) {
+      if ([`arrow-shower`, `gojo-pull`, `gojo-domain`, `sukuna-zone`].includes(area.kind)) {
         this.ensureNetworkAreaMarker(area);
         continue;
       }
@@ -1171,13 +1418,13 @@ var ld = class {
     for (const id of this.networkAreaPulse.keys()) if (!active.has(id)) this.networkAreaPulse.delete(id);
     for (const [id, marker] of this.networkAreaMarkers || []) {
       if (active.has(id)) continue;
-      this.scene.remove(marker);
+      this.removeNetworkAreaMarker(marker);
       this.networkAreaMarkers.delete(id);
     }
   }
   clearNetworkVisuals() {
     this.clearNetworkTrapMarkers();
-    for (const marker of this.networkAreaMarkers?.values() || []) this.scene.remove(marker);
+    for (const marker of this.networkAreaMarkers?.values() || []) this.removeNetworkAreaMarker(marker);
     this.networkAreaMarkers?.clear();
     this.networkArrowFalls = [];
     if (this.combat?.weaponProjectiles?.arrow) this.combat.weaponProjectiles.arrow.count = 0;
@@ -1246,6 +1493,16 @@ var ld = class {
       (e.ammo = e.maxAmmo),
       (e.reloadT = 0),
       (e.superCharge = 0),
+      (e.skill2Charge = null),
+      (e.gojoBarrier = !1),
+      (e.gojoBarrierReadyAt = this.matchTime + 10),
+      (e.hardCCT = 0),
+      (e.hardCCRecoveryT = 0),
+      e.slowEffects.clear(),
+      e.bleeds.clear(),
+      e.burns.clear(),
+      e.sukunaBasicHits.clear(),
+      (e.sukunaRushT = 0),
       (e.comboStep = 0),
       (e.comboResetT = 0),
       (e.meleeLunge = null),
@@ -1558,11 +1815,11 @@ var ld = class {
         ).rotateX(-Math.PI / 2)));
     }
   }
-  updateGuide(e, t, n, r, i, a) {
+  updateGuide(e, t, n, r, i, a, charge = 0) {
     let o = this.player,
       s = this.guide;
     ((s.visible = !0), s.position.set(o.x, 0.06, o.z), (s.rotation.y = Math.atan2(n, r) - Math.PI / 2));
-    let c = a ? 16765498 : 16777215,
+    let c = t === `skill` && e.color ? e.color : a ? 16765498 : 16777215,
       l = a ? 0.34 : 0.17;
     if (((this.guideRect.visible = this.guideSector.visible = this.guideCircle.visible = !1),
       e.kind === `spread` || e.arc))
@@ -1579,6 +1836,32 @@ var ld = class {
         (this.guideRect.visible = !0),
         this.guideRect.material.color.set(c),
         (this.guideRect.material.opacity = l));
+    } else if (t === `skill` && e.id === `pull`) {
+      let distance = Math.min(i, e.range),
+        hit = this.world.raycast(o.x, o.z, o.x + n * distance, o.z + r * distance);
+      hit && (distance = Math.max(0.3, hit.dist - 0.3));
+      (this.guideCircle.position.set(distance, 0, 0),
+        this.guideCircle.scale.setScalar(e.radius),
+        (this.guideCircle.visible = !0),
+        this.guideCircle.material.color.set(c),
+        (this.guideCircle.material.opacity = 0.28),
+        this.guideRing.material.color.set(c),
+        (this.guideRing.material.opacity = 0.86));
+    } else if (t === `skill` && (e.id === `repulse` || e.id === `long-slash` || e.id === `flame`)) {
+      let range = e.id === `flame` ? charge >= 1 ? e.chargedRange : e.tapRange : e.range,
+        distance = Math.min(i, range),
+        hit = this.world.raycast(o.x, o.z, o.x + n * distance, o.z + r * distance);
+      hit && (distance = Math.max(0.3, hit.dist - 0.3));
+      (this.guideRect.scale.set(distance, 1, Math.max(0.14, (e.width || 0.18) * 2)),
+        (this.guideRect.visible = !0),
+        this.guideRect.material.color.set(c),
+        (this.guideRect.material.opacity = 0.26),
+        this.guideCircle.position.set(distance, 0, 0),
+        this.guideCircle.scale.setScalar(e.id === `flame` && charge >= 1 ? e.blast : 0.24),
+        (this.guideCircle.visible = !0),
+        this.guideCircle.material.color.set(c),
+        (this.guideCircle.material.opacity = e.id === `flame` && charge >= 1 ? 0.3 : 0.16),
+        this.guideRing.material.color.set(c));
     } else if (e.kind === `arrow-shower`) {
       let distance = Math.min(i, e.range);
       (this.guideCircle.position.set(distance, 0, 0),
@@ -1615,6 +1898,8 @@ var ld = class {
       ((this.guide.visible = !1),
         e && ((e.moveX = e.moveZ = 0), (e.isCharging = !1), (e.chargeLevel = 0)),
         this.input.cancelActions());
+      for (const action of this.input.takeSkillActions())
+        if (e && action.skill === 2 && action.phase === `cancel`) e.useSkill(2, `cancel`, Math.sin(e.facing), Math.cos(e.facing));
       return;
     }
     let t = this.input,
@@ -1626,7 +1911,41 @@ var ld = class {
       (e.chargeLevel = charging
         ? $c((performance.now() - chargeStartedAt) / (e.def.attack.chargeTime * 1000), 0, 1)
         : 0));
+    if (e.def.id === `sukuna` && e.skill2Charge) {
+      e.skill2Charging = !0;
+      e.skill2ChargeT = Math.max(0, this.matchTime - e.skill2Charge.startedAt);
+      e.chargeLevel = $c(e.skill2ChargeT / Math.max(0.1, e.def.skills[1].chargeTime || 1), 0, 1);
+    } else if (!this.networkSession) {
+      e.skill2Charging = !1;
+      e.skill2ChargeT = 0;
+      if (e.def.id === `sukuna`) e.chargeLevel = 0;
+    }
     if (t.consumeFlicker()) e.useFlicker(n.x, n.z) && this.vibrate([16, 20, 16]);
+    for (const action of t.takeSkillActions()) {
+      const chargedSkill = e.def.id === `sukuna` && action.skill === 2;
+      const phase = action.phase === `press`
+        ? chargedSkill ? `start` : `activate`
+        : chargedSkill && (action.phase === `release` || action.phase === `cancel`) ? action.phase : null;
+      if (!phase) continue;
+      const definition = e.def.skills?.[action.skill - 1];
+      const aimed = action.aimShot && definition
+        ? this.stickAim(action.aimShot, definition)
+        : t.touchMode && definition
+          ? this.autoAim(definition)
+          : null;
+      const direction = aimed ? { x: aimed.dx, z: aimed.dz } : this.networkAimDirection(e, n) || { x: Math.sin(e.facing), z: Math.cos(e.facing) };
+      const range = definition?.range || 0;
+      const accepted = e.useSkill(
+        action.skill,
+        phase,
+        direction.x,
+        direction.z,
+        aimed?.x ?? e.x + direction.x * range,
+        aimed?.z ?? e.z + direction.z * range,
+      );
+      if (accepted && action.skill === 2 && phase === `start`) this.vibrate([12, 16, 18]);
+      else if (accepted && phase === `activate`) this.vibrate([12, 16, 18]);
+    }
     for (let n of t.takeShots()) {
       if (n.cancelled) continue;
       let t = n.kind === `super` ? e.def.super : e.def.attack,
@@ -1639,13 +1958,24 @@ var ld = class {
     }
     if (t.touchMode) {
       let n = t.sticks,
+        skillPointer = [...t.skillPointers.values()].find((pointer) => pointer.moved),
         r =
           n.super.id !== null && n.super.moved && e.superReady
             ? `super`
             : n.aim.id !== null && n.aim.moved
               ? `attack`
               : null;
-      if (r && !e.airborne) {
+      if (skillPointer && !e.airborne) {
+        const definition = e.def.skills?.[skillPointer.skill - 1];
+        const skillAim = definition ? this.stickAim(skillPointer, definition) : null;
+        if (skillAim) {
+          ad.set(skillAim.x, 0.5, skillAim.z);
+          const skillCharge = skillPointer.chargeStarted
+            ? $c((performance.now() - skillPointer.startedAt) / Math.max(100, (definition.chargeTime || 1) * 1000), 0, 1)
+            : 0;
+          this.updateGuide(definition, `skill`, skillAim.dx, skillAim.dz, skillAim.dist, !1, skillCharge);
+        } else this.guide.visible = !1;
+      } else if (r && !e.airborne) {
         let t = this.stickAim(r === `super` ? n.super : n.aim, e.def[r]);
         (ad.set(e.x + t.dx * 5, 0.5, e.z + t.dz * 5), this.updateGuide(e.def[r], r, t.dx, t.dz, t.dist, r === `super`));
       } else (ad.set(e.x, 0.5, e.z), (this.guide.visible = !1));
@@ -1673,14 +2003,28 @@ var ld = class {
       r = Math.hypot(e.x, e.y) || 1,
       i = e.x / r,
       a = e.y / r,
-      o = t.kind === `lob` || t.kind === `leap` || t.kind === `arrow-shower`
-        ? Math.max(t.kind === `leap` ? 2 : 1, e.mag * t.range)
-        : t.range;
+      o = t.id === `flame`
+        ? e.chargeStarted && Number.isFinite(e.startedAt) && performance.now() - e.startedAt >= (t.chargeTime || 1) * 1000
+          ? t.chargedRange
+          : t.tapRange
+        : t.kind === `lob` || t.kind === `leap` || t.kind === `arrow-shower`
+          ? Math.max(t.kind === `leap` ? 2 : 1, e.mag * t.range)
+          : t.range;
     return { dx: i, dz: a, dist: o, x: n.x + i * o, z: n.z + a * o };
   }
   autoAim(e) {
     let t = this.player,
-      n = e.range * 1.05,
+      chargeElapsed = e.id === `flame`
+        ? t?.skill2Charge
+          ? Math.max(0, this.matchTime - t.skill2Charge.startedAt)
+          : t?.skill2Charging
+            ? t.skill2ChargeT || 0
+            : 0
+        : 0,
+      range = e.id === `flame`
+        ? chargeElapsed >= (e.chargeTime || 1) ? e.chargedRange : e.tapRange
+        : e.range,
+      n = range * 1.05,
       r = 0,
       i = 0,
       a = 1 / 0;
@@ -1732,7 +2076,7 @@ var ld = class {
         o > n || o >= a || ((a = o), (r = e.x), (i = e.z));
       }
     if (a === 1 / 0) {
-      let n = e.kind === `lob` || e.kind === `leap` ? e.range * 0.6 : e.range;
+      let n = e.kind === `lob` || e.kind === `leap` ? range * 0.6 : range;
       ((r = t.x + Math.sin(t.facing) * n), (i = t.z + Math.cos(t.facing) * n));
     }
     let o = Math.hypot(r - t.x, i - t.z) || 1;

@@ -1,4 +1,4 @@
-import { characterMaxAmmo, FLICKER, getCharacterDef } from '../data/characters.js';
+import { characterMaxAmmo, characterUsesAmmo, FLICKER, getCharacterDef } from '../data/characters.js';
 import { buildSpawnPoints, getMapDefinition } from '../maps/MapDefinitions.js';
 
 export function createSimulationState({ mode = 'deathmatch', mapId = 'open', mapSeed = 0, matchSeed = 0, players = [], spawnPoints = null } = {}) {
@@ -72,6 +72,20 @@ export function addPlayerState(state, player, position = {}) {
     parryT: 0,
     speedBoostT: 0,
     slowT: 0,
+    slowEffects: new Map(),
+    hardCCT: 0,
+    hardCCRecoveryT: 0,
+    airborneT: 0,
+    leapState: null,
+    skillCooldowns: [0, 0],
+    skill2Charge: null,
+    gojoBarrier: false,
+    gojoBarrierReadyAt: 10,
+    sukunaBasicHits: new Map(),
+    bleeds: new Map(),
+    burns: new Map(),
+    sukunaRushT: 0,
+    sukunaPassiveReadyAt: 0,
     deadT: 0,
     spawnProtectionT: 0,
     input: { seq: 0, moveX: 0, moveZ: 0, aimX: 0, aimZ: 1 },
@@ -82,7 +96,7 @@ export function addPlayerState(state, player, position = {}) {
     lastReceivedInputSeq: 0,
     lastProcessedInputSeq: 0,
     attackCooldown: 0,
-    ammo: characterMaxAmmo(character.id),
+    ammo: characterUsesAmmo(character.id) ? characterMaxAmmo(character.id) : 0,
     reloadT: 0,
     flickerReadyAt: FLICKER.cooldown,
     flickerInvulnT: 0,

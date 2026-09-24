@@ -106,6 +106,11 @@ export class NetworkGameSession extends EventTarget {
     this.network.emit(CLIENT_EVENTS.actionSuper, { actionId: ++this.nextActionId, ...aim, targetX, targetZ });
   }
 
+  sendSkill(skill, phase = 'activate', aimX, aimZ, targetX, targetZ) {
+    const aim = this.resolveAim(aimX, aimZ);
+    this.network.emit(CLIENT_EVENTS.actionSkill, { actionId: ++this.nextActionId, skill: skill === 2 ? 2 : 1, phase, ...aim, targetX, targetZ });
+  }
+
   resolveAim(aimX, aimZ) {
     let x = Number.isFinite(aimX) ? aimX : 0;
     let z = Number.isFinite(aimZ) ? aimZ : 0;

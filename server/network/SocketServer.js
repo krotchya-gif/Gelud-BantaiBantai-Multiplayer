@@ -14,6 +14,7 @@ import {
   sessionHelloSchema,
   settingsSchema,
   superSchema,
+  skillSchema,
   itemSchema,
 } from '../../shared/protocol/schemas.js';
 import { ConnectionRegistry } from './ConnectionRegistry.js';
@@ -263,6 +264,17 @@ export class WebSocketServer {
       const runner = room && this.activeMatches.get(room.id);
       if (!runner) return this.sendError(socket, 'MATCH_NOT_READY', 'Match belum dimulai.');
       if (!runner.acceptSuper(session.playerId, data)) this.sendError(socket, 'ACTION_REJECTED', 'Super belum siap atau posisi tidak valid.');
+    });
+
+    socket.on(CLIENT_EVENTS.actionSkill, (payload = {}) => {
+      if (!requireSession()) return;
+      const data = validate(skillSchema, payload);
+      if (!data) return;
+      if (!this.acceptActionId(socket, data.actionId)) return;
+      const room = this.roomManager.findById(session.roomId);
+      const runner = room && this.activeMatches.get(room.id);
+      if (!runner) return this.sendError(socket, 'MATCH_NOT_READY', 'Match belum dimulai.');
+      if (!runner.acceptSkill(session.playerId, data)) this.sendError(socket, 'ACTION_REJECTED', 'Skill belum siap atau aksi tidak valid.');
     });
 
     socket.on(CLIENT_EVENTS.actionItem, (payload = {}) => {

@@ -72,6 +72,16 @@ export const itemSchema = z.object({
   slot: z.number().int().min(0).max(1).default(0),
 }).strict();
 
+export const skillSchema = z.object({
+  actionId: z.number().int().nonnegative(),
+  skill: z.union([z.literal(1), z.literal(2)]),
+  phase: z.enum(['activate', 'start', 'release', 'cancel']).default('activate'),
+  aimX: finiteNumber.pipe(z.number().min(-1).max(1)).optional(),
+  aimZ: finiteNumber.pipe(z.number().min(-1).max(1)).optional(),
+  targetX: finiteNumber.optional(),
+  targetZ: finiteNumber.optional(),
+}).strict();
+
 export const flickerSchema = z.object({
   actionId: z.number().int().nonnegative(),
   dirX: finiteNumber.pipe(z.number().min(-1).max(1)),

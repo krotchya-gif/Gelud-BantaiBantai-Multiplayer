@@ -74,6 +74,10 @@ export class MatchRunner {
     return this.simulation.super(playerId, payload);
   }
 
+  acceptSkill(playerId, payload) {
+    return this.simulation.skill(playerId, payload);
+  }
+
   acceptItem(playerId, slot = 0) {
     return this.simulation.item(playerId, slot);
   }

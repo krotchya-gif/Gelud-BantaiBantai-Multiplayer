@@ -1,11 +1,11 @@
 # Gelud BakuHantam — Roster dan Skill v2 (rancangan)
 
-Status: **proposal untuk ditinjau dan diuji**, belum diterapkan ke game. Dokumen ini mengolah tiga arahan roster yang dibagikan pengguna pada 24 September 2026. Angka adalah titik awal playtest, bukan hasil balance yang sudah terbukti.
+Status per 25 September 2026: **stat, skill, dan tampilan Gojo/Sukuna diterapkan** pada simulasi solo dan multiplayer. Nama gameplay mengikuti daftar resmi di bawah; ID internal tetap dipakai untuk protocol. `npm run build`, `npm run test:characters`, dan full suite 23 file/99 test lulus. Build berisi 27 file/2.770.696 byte. Browser gameplay dua perangkat, touch langsung, dan balance playtest belum divalidasi. Angka tetap titik awal playtest. Skill untuk delapan karakter lama masih berupa proposal dan berada di luar implementasi ini.
 
 ## Arah desain
 
 - Delapan karakter lama mempertahankan serangan dasar, Super, dan peran utamanya. Setiap karakter mendapat Skill 1 dan Skill 2.
-- Dua karakter baru memakai **identitas orisinal sementara**: **Aksa** (pengendali ruang, ID `aksa`) dan **Rengga** (petarung tebasan, ID `rengga`). Keduanya mengambil *arah warna dan siluet* dari gambar redesign, lalu mengubah rambut, motif kostum, simbol, nama, dan istilah jurus. Nama kerja ini dapat diganti sebelum implementasi.
+- Dua karakter baru bernama **Gojo** (pengendali ruang, ID `gojo`) dan **Sukuna** (petarung tebasan, ID `sukuna`). Visual mengikuti gambar redesign pilihan pengguna; detail model, simbol, dan efek disesuaikan untuk tampilan game dari atas.
 - Semua efek yang mengubah hasil pertandingan berlaku sama di solo dan multiplayer melalui simulasi bersama 30 Hz. Client menggambar efek, suara, animasi, dan prediction; server menetapkan hasil multiplayer.
 - Desain ini mengutamakan kemampuan lawan untuk melihat ancaman, menghindar, dan membalas. Tidak ada skill biasa yang memberi damage besar, mobilitas tinggi, dan kontrol penuh sekaligus.
 
@@ -17,8 +17,8 @@ Status: **proposal untuk ditinjau dan diuji**, belum diterapkan ke game. Dokumen
 4. **Status bertumpuk.** Slow terkuat saja yang berlaku. Bleed dan burn dari sumber yang sama me-refresh durasi, bukan menjumlah damage. Pengurangan defense dari sumber yang sama me-refresh durasi. Bonus speed efektif dari skill dan item dibatasi **40% di atas speed karakter** sebelum pengaruh permukaan map.
 5. **Peta.** Bedakan cover yang bisa dihancurkan, rintangan permanen, dan batas arena. Efek penghancuran hanya mengenai cover yang ditandai bisa dihancurkan. Tembakan penembus cover tidak keluar dari batas arena. Wall stun terjadi hanya setelah gerak knockback benar-benar berbenturan dengan collision; satu cast dapat memicu satu wall stun per target.
 6. **Aksi jaringan.** Setiap aktivasi, release, dan recast skill punya `actionId`. Simulasi menyimpan sekumpulan ID aksi terbaru per pemain agar kiriman ulang atau paket terlambat tidak menjalankan skill dua kali. Input gerak tetap memakai `seq`; `actionId` tidak menggantikannya.
-7. **Resource.** Ello dan Syafiah tidak memakai ammo. Tidak ada meter Focus baru pada proposal ini; bar di bawah HP tetap menampilkan Super. Item ammo mengikuti aturan saat ini: pada karakter tanpa ammo, item tersebut mengisi 20% Super. Aksa menampilkan satu indikator Barrier terpisah.
-8. **Super charge.** Delapan karakter lama memakai ambang charge yang ada saat ini. Aksa mulai di **3.800** dan Rengga **4.000** sebagai angka uji. Semua charge dihitung oleh simulasi, bukan dari animasi client.
+7. **Resource.** Ello dan Syafiah tidak memakai ammo. Tidak ada meter Focus baru pada proposal ini; bar di bawah HP tetap menampilkan Super. Item ammo mengikuti aturan saat ini: pada karakter tanpa ammo, item tersebut mengisi 20% Super. Gojo menampilkan satu indikator Barrier terpisah.
+8. **Super charge.** Delapan karakter lama memakai ambang charge yang ada saat ini. Gojo mulai di **3.800** dan Sukuna **4.000** sebagai angka uji. Semua charge dihitung oleh simulasi, bukan dari animasi client.
 
 ## Kontrol
 
@@ -27,7 +27,7 @@ Status: **proposal untuk ditinjau dan diuji**, belum diterapkan ke game. Dokumen
 | Desktop | Kontrol serangan saat ini | `Q` atau `1` | `E` atau `2` | `Space` | Item 1, Item 2, Flicker `Shift` tetap seperti sekarang |
 | Touch | Tombol serang saat ini | Tombol atas pada lengkung kanan | Tombol tengah pada lengkung kanan | Tombol terbawah pada lengkung kanan | Item 1, Item 2, Flicker di baris utility |
 
-`E` masih mengaktifkan Super pada implementasi sekarang. Saat rancangan ini diimplementasikan, binding itu perlu dipindahkan ke Skill 2 dan Super hanya memakai `Space`, supaya satu tombol tidak menjalankan dua aksi. Tombol touch Skill 1 dan Skill 2 ditargetkan minimal 68 px; Super tetap 112 px. Layout harus mengikuti safe area, mode tangan kiri, dan multi-touch joystick tanpa pointer saling merebut.
+Implementasi saat ini memakai `Q`/`1` untuk Skill 1, `E`/`2` untuk Skill 2, dan `Space` atau klik kanan untuk Super. Touch memakai dua tombol skill pada lengkung kanan yang dipindah ke kiri pada mode left-handed; ukuran skill menyesuaikan viewport pada kisaran 50–62 px. Aksi tombol skill dan Super terpisah agar satu input tidak memicu dua aksi. Layout mempertahankan safe area dan pointer multi-touch joystick.
 
 ## Delapan karakter lama
 
@@ -89,36 +89,36 @@ Super Iaido memakai bonus dari Parry Stance. Fase guard pada Super lama perlu di
 - **Skill 1 — Eagle Eye:** Selama 5 detik, kamera dapat menampilkan area hingga **1,20×** lebih luas tanpa mengubah akurasi/server hitbox. Satu charged shot berikutnya menembus **satu cover yang bisa dihancurkan**, lalu efek pierce habis. Cooldown **14 detik**. Rintangan permanen tetap menghentikan panah.
 - **Skill 2 — Caltrops Trap:** Lompat mundur maksimal 2,2 unit mengikuti collision, meninggalkan jebakan di posisi awal selama 3 detik. Musuh yang menginjaknya melambat **35%** dan menerima **80 damage/detik selama 2 detik**; efek pada target tidak stack. Cooldown **11 detik**.
 
-## Dua karakter baru — identitas orisinal sementara
+## Dua karakter baru — Gojo dan Sukuna
 
-### Aksa (`aksa`) — pengendali ruang
+### Gojo (`gojo`) — pengendali ruang
 
-**Visual:** Postur ramping, rambut perak berpotongan asimetris, mantel biru gelap yang terbelah di sisi, bagian dalam warna tembaga, dan sarung tangan berpanel geometris. Efek berupa garis lipatan ruang **cyan dan amber**; wajah terbuka, tanpa penutup mata atau lambang yang merujuk karakter asal. Dari kamera atas, tepi mantel dan kedua warna energi menjadi penanda utama.
+**Visual (mengikuti lembar `gojo1.png` terbaru):** Postur ramping, rambut putih berlapis dan mata biru, mantel hitam berkerah tinggi dengan lapisan biru kobalt, harness dan buckle perak, strap panjang dengan tag segitiga, celana longgar, serta boots hitam bersol terang. Wajah terbuka tanpa penutup mata. Energi tangan berwarna **biru dan merah**. Nama pada game tetap Gojo; tulisan VOID pada lembar referensi tidak mengganti nama karakter.
 
 **Dasar:** 3.000 HP, speed 3,25, tanpa ammo, Super charge 3.800. Perannya kontrol posisi dengan daya tahan rendah.
 
-- **Pasif — Lapisan Ruang:** Setelah **10 detik tanpa menerima hit**, Aksa memperoleh satu barrier. Barrier meniadakan satu damage instance dan CC yang melekat padanya, lalu timer 10 detik dimulai lagi. Satu pellet dari shotgun menghabiskan barrier; pellet lain tetap dihitung. Barrier tidak memblokir hazard map yang tidak berasal dari serangan pemain.
-- **Basic — Tekan Balik:** Combo tiga hit, reset 0,75 detik: **350 / 350 / 600** damage. Dua hit awal menarik target yang benar-benar terkena sejauh maksimal 0,3 unit melalui collision; hit ketiga mendorong 5 unit. Tidak ada tarikan AoE gratis dari pukulan yang meleset.
-- **Skill 1 — Pusat Tarik:** Orb range 7,5 membentuk area radius 2,4 selama 1,4 detik. Target di dalam menerima **300 damage sekali per cast**, slow **30%**, dan tarikan bertahap yang diselesaikan setiap tick dengan collision. Cooldown **10 detik**. Dash dapat dipakai untuk keluar.
-- **Skill 2 — Dorong Garis:** Gelombang lurus range 5, damage **700**, knockback **5,5 unit**. Tabrakan nyata dengan rintangan memberi stun **0,7 detik** sekali per target. Cooldown **11 detik**.
-- **Super — Ruang Senyap:** Telegraph **0,5 detik** sebelum area radius **3,8** aktif. Musuh yang ada di area saat aktivasi terkena freeze **1,5 detik**, tunduk pada aturan hard CC bersama. Tidak ada pengurangan defense. Musuh yang masuk sesudah aktivasi tidak mendapat freeze baru. Area visual bertahan hanya untuk menunjukkan akhir efek; ia tidak mengunci gerak secara permanen.
+- **Pasif — Infinity Barrier:** Setelah **10 detik tanpa menerima hit**, Gojo memperoleh satu barrier. Barrier meniadakan satu damage instance dan CC yang melekat padanya, lalu timer 10 detik dimulai lagi. Satu pellet dari shotgun menghabiskan barrier; pellet lain tetap dihitung. Barrier tidak memblokir hazard map yang tidak berasal dari serangan pemain.
+- **Basic Attack — Limitless Strike (Melee Combo):** Combo tiga hit, reset 0,75 detik: **350 / 350 / 600** damage. Dua hit awal menarik target yang benar-benar terkena sejauh maksimal 0,3 unit melalui collision; hit ketiga mendorong 5 unit. Tidak ada tarikan AoE gratis dari pukulan yang meleset.
+- **Skill 1 — Cursed Technique Lapse - Blue:** Orb range 7,5 membentuk area radius 2,4 selama **1,4 detik**. Durasi terlihat lewat area yang berakhir dengan fade; orb menarik target selama area aktif. Target menerima **300 damage sekali per cast**, slow **30%**, dan tarikan bertahap yang diselesaikan setiap tick dengan collision. Cooldown **10 detik**. Dash dapat dipakai untuk keluar.
+- **Skill 2 — Cursed Technique Reversal - Red:** Gelombang lurus range 5, damage **700**, knockback **5,5 unit**. Tabrakan nyata dengan rintangan memberi stun **0,7 detik** sekali per target. Cooldown **11 detik**.
+- **Super / Ultimate — Domain Expansion - Infinite Void:** Telegraph **0,5 detik** sebelum area radius **3,8** aktif. Musuh yang ada di area saat aktivasi terkena freeze **1,5 detik**, tunduk pada aturan hard CC bersama. Tidak ada pengurangan defense. Musuh yang masuk sesudah aktivasi tidak mendapat freeze baru. Area visual bertahan hanya untuk menunjukkan akhir efek; ia tidak mengunci gerak secara permanen.
 
-### Rengga (`rengga`) — petarung tebasan agresif
+### Sukuna (`sukuna`) — petarung tebasan agresif
 
-**Visual:** Tubuh tegap, rambut marun pendek, pelindung bahu tidak simetris, kain pinggang berlapis, dan panel logam retak yang menyala merah pada tangan. Dua lengan normal; tidak memakai tanda wajah/tubuh atau bentuk kuil dari referensi asal. Efek tebasan berupa pecahan merah pendek dengan bentuk yang mudah dibaca pada kamera atas.
+**Visual (mengikuti lembar `sukuna1.png` terbaru):** Tubuh tegap dengan dada terbuka, rambut hitam dengan ujung merah, mata merah, pola merah pada wajah dan torso, jaket hitam asimetris, panel mantel berjumbai dengan lapisan merah, kain pinggang merah, rantai dan tag logam persegi, serta boots hitam bersol terang. Dua lengan normal mengikuti redesign. Kedua tangan membawa nyala Fuga berwarna jingga-merah; tebasan Dismantle tetap merah.
 
 **Dasar:** 4.200 HP, speed **3,25**, 3 ammo, reload 1,1 detik, Super charge 4.000. Perannya menekan musuh dekat dan memaksa mereka keluar dari area.
 
-- **Pasif — Dorongan Tempur:** Eliminasi memulihkan **15% HP maksimum (630 HP)** dan memberi speed +10% selama 2 detik. Internal cooldown **4 detik**; eliminasi selama cooldown tidak memberi heal atau me-refresh buff.
-- **Basic — Sayat:** Cone range 3, damage **450**, biaya 1 ammo. Tiga hit basic pada target yang sama dalam 1,5 detik memicu bleed **80 damage/detik selama 3 detik** (total 240). Bleed hanya me-refresh, tidak stack.
-- **Skill 1 — Iris Jauh:** Tebasan lurus range 7,5, damage **600**, menembus maksimal tiga pemain/bot; berhenti pada cover dan rintangan. Cooldown **7 detik**.
-- **Skill 2 — Bara Lepas:** Tap: proyektil 500 damage, range 6. Hold 1 detik: proyektil **1.100 damage**, range 9,5, ledakan radius 1,8, burn **90 damage/detik selama 3 detik**. Cooldown **12 detik**, mulai saat charge diterima. Release dan pembatalan memakai aturan `actionId` yang sama.
-- **Super — Lingkar Sayat:** Telegraph **0,45 detik**, lalu zona radius **4,5** aktif 4 detik. Delapan tick setiap 0,5 detik memberi **180 damage per tick** (maksimal 1.440 jika target bertahan penuh di dalam area). Tick pertama menghancurkan cover yang bisa dihancurkan; batas arena dan rintangan permanen tetap. Tidak ada slow, pull, atau stun. Damage hanya masuk saat target masih di area pada tick tersebut.
+- **Pasif — Reverse Cursed Technique:** Eliminasi memulihkan **15% HP maksimum (630 HP)** dan memberi speed +10% selama 2 detik. Internal cooldown **4 detik**; eliminasi selama cooldown tidak memberi heal atau me-refresh buff.
+- **Basic Attack — Cleave (Melee Cone):** Cone range 3, damage **450**, biaya 1 ammo. Tiga hit basic pada target yang sama dalam 1,5 detik memicu bleed **80 damage/detik selama 3 detik** (total 240). Bleed hanya me-refresh, tidak stack.
+- **Skill 1 — Dismantle:** Tebasan lurus range 7,5, damage **600**, menembus maksimal tiga pemain/bot; berhenti pada cover dan rintangan. Cooldown **7 detik**.
+- **Skill 2 — Fuga - Kamino / Flame Arrow:** Tap: proyektil 500 damage, range 6. Hold 1 detik: proyektil **1.100 damage**, range 9,5, ledakan radius 1,8, burn **90 damage/detik selama 3 detik**. Cooldown **12 detik**, mulai saat charge diterima. Release dan pembatalan memakai aturan `actionId` yang sama.
+- **Super / Ultimate — Domain Expansion - Malevolent Shrine:** Telegraph **0,45 detik**, lalu zona radius **4,5** aktif 4 detik. Delapan tick setiap 0,5 detik memberi **180 damage per tick** (maksimal 1.440 jika target bertahan penuh di dalam area). Tick pertama menghancurkan cover yang bisa dihancurkan; batas arena dan rintangan permanen tetap. Tidak ada slow, pull, atau stun. Damage hanya masuk saat target masih di area pada tick tersebut.
 
 ## Aturan implementasi dan validasi saat rancangan disetujui
 
 - Simpan cooldown, status, posisi dash/pull/knockback, cover rusak, dan hasil hit di simulasi bersama; kirim state yang diperlukan melalui snapshot 15 Hz dan gameplay event terpisah. Jangan membuat snapshot tambahan setiap event.
-- Recast Naka dan charge Rengga memerlukan start/release/cancel yang eksplisit. Simpan arah aim terakhir saat input bernilai `(0, 0)` agar melee, proyektil, dan charge tetap punya arah yang valid.
+- Recast Naka dan charge Sukuna memerlukan start/release/cancel yang eksplisit. Simpan arah aim terakhir saat input bernilai `(0, 0)` agar melee, proyektil, dan charge tetap punya arah yang valid.
 - Uji authoritative: barrier versus pellet dan tick AoE; parry versus multi-hit; hard CC beruntun; knockback versus cover dan batas map; deduplikasi aksi yang tiba tidak berurutan; cooldown saat mati/respawn; dua slot item; kondisi reconnect.
 - Uji visual solo dan multiplayer di desktop serta touch: tombol baru, joystick bersamaan dengan skill, mode tangan kiri, safe area, indikator cooldown, telegraph Super, area smoke/domain, dan performa efek berbasis pool.
 - Ukur balance per karakter setelah dimainkan: pick rate, win rate, damage per menit, kematian, hit rate skill, rata-rata durasi hard CC yang diterima, jarak tempuh, barrier block, parry sukses, dan lama bertahan hidup. Ubah angka setelah ada sampel pertandingan yang cukup.
@@ -126,8 +126,8 @@ Super Iaido memakai bonus dari Parry Stance. Fase guard pada Super lama perlu di
 ## Keputusan yang disengaja dibanding dokumen v1
 
 - Kontrol desktop mengikuti keputusan pengguna: Super `Space`, Skill 1 `Q/1`, Skill 2 `E/2`. Binding `E` untuk Super yang ada sekarang harus dihapus saat implementasi.
-- Gojo/Sukuna dijadikan **Aksa/Rengga** sebagai identitas kerja orisinal. Keduanya tetap mengisi peran pengendali ruang dan petarung tebasan dari brief.
+- Nama dan ID dua karakter baru tetap **Gojo (`gojo`)** dan **Sukuna (`sukuna`)** sesuai keputusan pengguna. Visual menggunakan referensi redesign yang dipilih.
 - Zeyd mendapat damage Piercing Bolt yang sebelumnya kosong. Penetrasi dan penghancuran dibatasi pada cover yang memang mendukungnya.
 - Ello dan Syafiah tidak mendapat meter Focus baru karena cara mengisi dan membelanjakannya belum ada pada brief ataupun simulasi sekarang.
-- Aksa kehilangan pengurangan defense pada Super dan durasi freeze dipersingkat. Rengga kehilangan damage domain yang berlebihan; kedua Super mendapat telegraph dan aturan hit yang jelas.
+- Gojo kehilangan pengurangan defense pada Super dan durasi freeze dipersingkat. Sukuna kehilangan damage domain yang berlebihan; kedua Super mendapat telegraph dan aturan hit yang jelas.
 - Bonus Overcharge Nopal, perlindungan Taunt Einar, dan ammo Tactical Roll dikurangi sebagai titik awal pengujian, bukan nerf yang sudah tervalidasi oleh data.

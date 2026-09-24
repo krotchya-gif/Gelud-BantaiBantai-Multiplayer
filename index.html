@@ -37,22 +37,21 @@
         <ol id="dm-leaderboard-list"></ol>
       </div>
       <div id="banner" class="outline"></div>
-      <div id="hints"><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> move &nbsp; <kbd>Mouse</kbd> aim &nbsp; <kbd>Click</kbd> shoot<br /><kbd>Space</kbd> / <kbd>Right-click</kbd> hold to aim super, release to fire<br /><kbd>Shift</kbd> flicker &nbsp; <kbd>F</kbd> item 1 &nbsp; <kbd>G</kbd> item 2 &nbsp; <kbd>T</kbd> time of day &nbsp; <kbd>P</kbd> pause &nbsp; <kbd>M</kbd> mute</div>
+      <div id="hints"><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> move &nbsp; <kbd>Mouse</kbd> aim &nbsp; <kbd>Click</kbd> shoot<br /><kbd>Space</kbd> / <kbd>Right-click</kbd> hold to aim super, release to fire<br /><span id="skill-hint" hidden><kbd>Q</kbd>/<kbd>1</kbd> skill 1 &nbsp; <kbd>E</kbd>/<kbd>2</kbd> skill 2<br /></span><kbd>Shift</kbd> flicker &nbsp; <kbd>F</kbd> item 1 &nbsp; <kbd>G</kbd> item 2 &nbsp; <kbd>T</kbd> time of day &nbsp; <kbd>P</kbd> pause &nbsp; <kbd>M</kbd> mute</div>
       <div id="sticks">
         <div class="stick" id="stick-move"><i></i><b>MOVE</b></div>
-        <div class="stick" id="stick-aim"><i></i><b>DRAG TO AIM &middot; TAP TO AUTO-AIM</b></div>
+        <div class="stick" id="stick-aim"><i></i></div>
       </div>
       <div id="action-cluster">
-        <span id="aim-hint">DRAG TO AIM &middot; TAP TO AUTO-AIM</span>
-        <button id="attack-control" type="button" aria-label="Attack: drag to aim, tap to auto-aim">
+        <button id="attack-control" type="button" aria-label="Attack">
           <svg viewBox="0 0 48 48" fill="none" aria-hidden="true">
             <path d="m10 8 17 17M38 8 21 25M8 10l6-3 5 5-3 6M40 10l-6-3-5 5 3 6M20 26l-6 6m10-3 6 6M12 38l4-4m16 4-4-4" stroke="currentColor" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round" />
           </svg>
           <span class="attack-label">ATTACK</span>
         </button>
         <div id="skill-arc" aria-label="Skill buttons">
-          <span class="skill-reserved skill-reserved-one" aria-hidden="true"><i>✦</i><b>SKILL 1</b></span>
-          <span class="skill-reserved skill-reserved-two" aria-hidden="true"><i>✧</i><b>SKILL 2</b></span>
+          <button id="skill-action-1" class="skill-reserved skill-reserved-one" type="button" disabled aria-label="Skill 1 unavailable" title="Skill 1 unavailable"><i aria-hidden="true">✦</i><b>SKILL 1</b><span class="skill-state">READY</span><kbd>Q</kbd></button>
+          <button id="skill-action-2" class="skill-reserved skill-reserved-two" type="button" disabled aria-label="Skill 2 unavailable" title="Skill 2 unavailable"><i aria-hidden="true">✧</i><b>SKILL 2</b><span class="skill-state">READY</span><kbd>E</kbd></button>
           <div id="super"><div class="core" id="super-core">SUPER</div></div>
         </div>
         <div id="utility-actions" aria-label="Items and dodge">
@@ -73,6 +72,7 @@
           </button>
         </div>
       </div>
+      <div id="character-status" hidden role="status" aria-live="polite"></div>
     </div>
 
     <div id="desktop-actions" aria-label="Match controls">
@@ -160,7 +160,7 @@
         <div class="room-code-display">ROOM <strong id="room-code-value">------</strong><button class="compact-btn" id="copy-room-code" type="button">COPY</button></div>
         <div id="room-player-list" class="room-player-list"></div>
         <div class="room-settings">
-          <label>CHARACTER <select id="room-character"><option value="dusty">ATHALLAH</option><option value="ace">ZEYD</option><option value="fuse">AZKA</option><option value="titan">EINAR</option><option value="volt">NOPAL</option><option value="naka">NAKA</option><option value="ello">ELLO</option><option value="syafiah">SYAFIAH</option></select></label>
+          <label>CHARACTER <select id="room-character"><option value="dusty">ATHALLAH</option><option value="ace">ZEYD</option><option value="fuse">AZKA</option><option value="titan">EINAR</option><option value="volt">NOPAL</option><option value="naka">NAKA</option><option value="ello">ELLO</option><option value="syafiah">SYAFIAH</option><option value="gojo">GOJO</option><option value="sukuna">SUKUNA</option></select></label>
           <label>MODE <select id="room-mode"><option value="deathmatch">DEATHMATCH</option><option value="classic">CLASSIC</option><option value="blitz">BLITZ</option></select></label>
           <label>MAP <select id="room-map" aria-label="Map room"></select></label>
         </div>

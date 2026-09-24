@@ -213,4 +213,39 @@ function createBalancedBotRoster(characterIds, count, seed = 0) {
   for (const [id, identity] of Object.entries(identities)) Object.assign(Bc[id], identity);
   Bc.volt.attack = { ...Bc.volt.attack, color: 0xffd43b };
   Bc.volt.super = { ...Bc.volt.super, color: 0xffed98 };
+  Bc.gojo = {
+    id: 'gojo', name: 'Gojo', alias: 'Gojo', role: 'Space Controller',
+    blurb: 'Limitless Strike · Blue draws foes in · Red blasts them away.',
+    hp: 3000, speed: 3.25, reload: 1, preferred: 3.2, maxAmmo: 0, superCharge: 3800,
+    stats: { durability: 2, agility: 3, damage: 4, range: 4 },
+    passive: 'Infinity Barrier: gain one barrier after 10 seconds without taking a hit.',
+    visual: 'sorcerer', palette: { body: 0x171b28, dark: 0x10121c, accent: 0x345bff, skin: 0xeac4b3 },
+    attack: {
+      kind: 'melee', name: 'Limitless Strike', count: 1, interval: 0.12, damage: 350, range: 2.8, arc: 1.5, radius: 0.45,
+      cooldown: 0.34, combo: [
+        { damage: 350, pull: 0.3, recovery: 0.34 },
+        { damage: 350, pull: 0.3, recovery: 0.34 },
+        { damage: 600, push: 5, recovery: 0.46 },
+      ], comboReset: 0.75, color: 0x4777ff,
+    },
+    skills: [
+      { id: 'pull', name: 'Cursed Technique Lapse - Blue', shortName: 'BLUE', cooldown: 10, range: 7.5, radius: 2.4, damage: 300, slow: 0.3, duration: 1.4, pullSpeed: 3, color: 0x416cff },
+      { id: 'repulse', name: 'Cursed Technique Reversal - Red', shortName: 'RED', cooldown: 11, range: 5, damage: 700, width: 0.55, knockback: 5.5, wallStun: 0.7, color: 0xff456d },
+    ],
+    super: { kind: 'gojo-domain', name: 'Domain Expansion - Infinite Void', range: 7.5, radius: 3.8, warningDelay: 0.5, duration: 1.5, freeze: 1.5, color: 0x617cff },
+  };
+  Bc.sukuna = {
+    id: 'sukuna', name: 'Sukuna', alias: 'Sukuna', role: 'Aggressive Slasher',
+    blurb: 'Cleave up close, cut through foes with Dismantle, then charge Fuga.',
+    hp: 4200, speed: 3.25, reload: 1.1, preferred: 3.1, maxAmmo: 3, superCharge: 4000,
+    stats: { durability: 4, agility: 3, damage: 5, range: 2 },
+    passive: 'Reverse Cursed Technique: eliminations restore health and briefly increase movement speed.',
+    visual: 'sorcerer', palette: { body: 0x21191f, dark: 0x101116, accent: 0x9e2437, skin: 0xd6a18c },
+    attack: { kind: 'melee', name: 'Cleave', count: 1, interval: 0.12, damage: 450, range: 3, arc: 1.5, radius: 0.45, cooldown: 0.24, color: 0xf34255, sukunaBasic: true },
+    skills: [
+      { id: 'long-slash', name: 'Dismantle', shortName: 'DISMANTLE', cooldown: 7, range: 7.5, damage: 600, maxTargets: 3, width: 0.55, color: 0xe52d45 },
+      { id: 'flame', name: 'Fuga - Kamino / Flame Arrow', shortName: 'FUGA', cooldown: 12, chargeTime: 1, range: 9.5, tapDamage: 500, tapRange: 6, chargedDamage: 1100, chargedRange: 9.5, blast: 1.8, burnDamage: 90, burnDuration: 3, projectileSpeed: 18, color: 0xff642e },
+    ],
+    super: { kind: 'sukuna-zone', name: 'Domain Expansion - Malevolent Shrine', range: 7.5, radius: 4.5, warningDelay: 0.45, duration: 4, waveCount: 8, waveInterval: 0.5, waveDamage: 180, breaksWalls: true, color: 0xe52d45 },
+  };
 })();

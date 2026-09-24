@@ -9,6 +9,24 @@ export const CHARACTER_DEFS = Object.freeze({
   naka: Object.freeze({ id: 'naka', name: 'Naka', speed: 3.9, reload: 1.05, maxHp: 3200, superCharge: 3500, terrainAffinity: { type: 'bush', moveMultiplier: 1.08 }, attack: { kind: 'spread', count: 3, pellets: 3, damage: 280, speed: 24, range: 7, spread: 0.24, radius: 0.16, projectile: 'shuriken', color: 0x50f1d2, cooldown: 0.22, returning: true, returnDamageMultiplier: 0.5 }, super: { kind: 'dash', damage: 900, range: 6, radius: 0.72, flight: 0.22, color: 0x9affdf, cooldown: 0.2 } }),
   ello: Object.freeze({ id: 'ello', name: 'Ello', speed: 3.3, reload: 1, maxHp: 5500, superCharge: 3500, terrainAffinity: { type: 'ice', tractionMultiplier: 1.2 }, attack: { kind: 'melee', count: 1, damage: 550, range: 2.9, arc: 1.35, radius: 0.52, knockback: 1.4, color: 0xffcf6a, cooldown: 0.34, combo: [{ damage: 550, recovery: 0.34, lunge: 0.35 }, { damage: 650, recovery: 0.34, lunge: 0.4 }, { damage: 800, recovery: 0.46, lunge: 0.5 }], comboReset: 0.75, lungeDuration: 0.13 }, super: { kind: 'iaido', damage: 1100, baseDamage: 1100, parryDamage: 1500, range: 5.5, dashRange: 5.5, dashDuration: 0.2, radius: 0.8, slashRadius: 0.8, arc: 2.4, guardDuration: 0.45, color: 0xffdc75, cooldown: 0.2 } }),
   syafiah: Object.freeze({ id: 'syafiah', name: 'Syafiah', speed: 3.2, reload: 1.35, maxHp: 2900, superCharge: 3600, terrainAffinity: { type: 'low-gravity', rangeMultiplier: 1.1 }, attack: { kind: 'burst', count: 1, damage: 650, maxDamage: 1050, speed: 25, maxSpeed: 30, range: 10, maxRange: 12.5, chargeTime: 0.7, shotRecovery: 0.45, quickDamage: 650, quickRange: 10, quickSpeed: 25, radius: 0.12, projectile: 'arrow', color: 0xffc56c, cooldown: 0.45 }, super: { kind: 'arrow-shower', damage: 250, waveDamage: 250, range: 10.5, radius: 3.4, areaRadius: 3.4, waveCount: 5, waveInterval: 0.35, warningDelay: 0.45, projectileCount: 8, color: 0xfff0aa, cooldown: 0.2 } }),
+  gojo: Object.freeze({
+    id: 'gojo', name: 'Gojo', role: 'Space Controller', speed: 3.25, reload: 1, maxHp: 3000, superCharge: 3800,
+    attack: { kind: 'melee', name: 'Limitless Strike', count: 1, interval: 0.12, damage: 350, range: 2.8, arc: 1.5, radius: 0.45, cooldown: 0.34, combo: [{ damage: 350, pull: 0.3, recovery: 0.34 }, { damage: 350, pull: 0.3, recovery: 0.34 }, { damage: 600, push: 5, recovery: 0.46 }], comboReset: 0.75, color: 0x4777ff },
+    skills: [
+      { id: 'pull', name: 'Cursed Technique Lapse - Blue', shortName: 'BLUE', cooldown: 10, range: 7.5, radius: 2.4, damage: 300, slow: 0.3, duration: 1.4, pullSpeed: 3, color: 0x416cff },
+      { id: 'repulse', name: 'Cursed Technique Reversal - Red', shortName: 'RED', cooldown: 11, range: 5, damage: 700, width: 0.55, knockback: 5.5, wallStun: 0.7, color: 0xff456d },
+    ],
+    super: { kind: 'gojo-domain', name: 'Domain Expansion - Infinite Void', range: 7.5, radius: 3.8, warningDelay: 0.5, duration: 1.5, freeze: 1.5, color: 0x617cff, cooldown: 0.2 },
+  }),
+  sukuna: Object.freeze({
+    id: 'sukuna', name: 'Sukuna', role: 'Aggressive Slasher', speed: 3.25, reload: 1.1, maxHp: 4200, maxAmmo: 3, superCharge: 4000,
+    attack: { kind: 'melee', name: 'Cleave', count: 1, interval: 0.12, damage: 450, range: 3, arc: 1.5, radius: 0.45, cooldown: 0.24, color: 0xf34255, sukunaBasic: true },
+    skills: [
+      { id: 'long-slash', name: 'Dismantle', shortName: 'DISMANTLE', cooldown: 7, range: 7.5, damage: 600, maxTargets: 3, width: 0.55, color: 0xe52d45 },
+      { id: 'flame', name: 'Fuga - Kamino / Flame Arrow', shortName: 'FUGA', cooldown: 12, chargeTime: 1, range: 9.5, tapDamage: 500, tapRange: 6, chargedDamage: 1100, chargedRange: 9.5, blast: 1.8, burnDamage: 90, burnDuration: 3, projectileSpeed: 18, color: 0xff642e },
+    ],
+    super: { kind: 'sukuna-zone', name: 'Domain Expansion - Malevolent Shrine', range: 7.5, radius: 4.5, warningDelay: 0.45, duration: 4, waveCount: 8, waveInterval: 0.5, waveDamage: 180, breaksWalls: true, color: 0xe52d45, cooldown: 0.2 },
+  }),
 });
 
 export function getCharacterDef(characterId) {
@@ -18,7 +36,7 @@ export function getCharacterDef(characterId) {
 export const CHARACTER_IDS = Object.freeze(Object.keys(CHARACTER_DEFS));
 
 export function characterUsesAmmo(characterId) {
-  return characterId !== 'ello' && characterId !== 'syafiah';
+  return characterId !== 'ello' && characterId !== 'syafiah' && characterId !== 'gojo';
 }
 
 export function characterMaxAmmo(characterId) {

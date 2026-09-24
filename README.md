@@ -86,12 +86,16 @@ Implementasi yang sudah tersedia:
 - Maksimal 8 pemain per room. Join-in-progress tidak didukung setelah match berjalan.
 - Classic, Blitz, dan Deathmatch; Deathmatch memakai target 50 kill, batas waktu 5 menit, respawn 5 detik, dan spawn protection 2 detik.
 - Shared simulation untuk movement, collision, surface modifier, hazard, projectile, melee, damage, knockback, ammo/reload, Super, item, death, respawn, scoreboard, dan match result.
+- Gojo dan Sukuna tersedia di solo serta lobby multiplayer. Data stat/skill canonical ada di `shared/data/characters.js`, disamakan dengan roster engine solo, dan skill mereka dieksekusi server secara authoritative. Charge Sukuna memakai fase start/release/cancel; Barrier Gojo memblokir satu hit pemain beserta hard CC, termasuk CC murni dari Domain.
+- State airborne Titan juga authoritative: gerak dan serangan yang diterima ditahan selama leap, damage/CC mengabaikan Titan di udara, Super meledak saat mendarat, dan sisa durasinya menggerakkan animasi jaringan.
 - Input gerak yang datang bersamaan dari WebSocket diantrikan dan dikonsumsi satu per tick authoritative. Nilai `ack` adalah sequence terakhir yang benar-benar diproses, sehingga replay prediction client tetap sejajar ketika paket datang bergerombol.
 - Semua karakter, nama display, damage, ammo, cooldown, Super, item, HUD, dan event combat disamakan antara solo dan multiplayer. `Flicker` juga authoritative di server dan tersedia untuk bot.
 - Solo Deathmatch memakai 15 bot. Bot mengunci target setelah spawn, mencari jalur saat target tertutup cover biasa, tetap menghormati persembunyian di semak, agresif setelah respawn, dan dapat memakai Flicker. Server multiplayer menyediakan bot authoritative opsional melalui `SERVER_BOTS=0..6`; jumlah akhirnya tetap dibatasi kapasitas room.
 - Collision map server dan arena client dibuat dari map ID serta seed yang sama. Paket map berisi 24 arena dari 8 biome dengan 3 varian per biome. Spawn awal dipilih dari sel walkable yang tersebar, bukan mengulang delapan titik lalu menumpuk bot di dekatnya.
 - Multiplayer merender karakter dari roster visual yang sama dengan solo. Geometri projectile dan material item memakai cache combat yang sama, mesh projectile dipool untuk mengurangi garbage collection, dan warna efek memakai tipe `Color` canonical. Badan pemain remote mengikuti velocity saat bergerak; arah aim tetap disimpan terpisah untuk serangan dan pose charge/recoil.
+- Rig Gojo dan Sukuna memakai builder model yang sama untuk solo dan multiplayer. Ikon PWA kini memakai artwork transparent PNG dari `output/imagegen/bakuhantam-icon-transparent.png`; varian 192, 512, Apple, dan maskable memakai artwork itu dengan alpha transparan dan ruang aman untuk maskable.
 - Input touch multiplayer memakai fallback auto-aim yang sama dengan solo saat pemain melakukan tap tanpa perpindahan joystick. Client dan server juga mengganti vektor aim kosong dengan arah aim/facing terakhir, sehingga projectile, melee, shuriken, dan arrow tidak berhenti atau selalu mengarah ke default.
+- HUD touch saat match tidak lagi menampilkan petunjuk “Drag to Aim”. Pickup dan pemakaian item juga tidak memunculkan toast bawah; slot item, efek, dan suara tetap memberi feedback tanpa menutup kontrol utility.
 - Snapshot penuh tetap 15 Hz walaupun event combat ramai. Event projectile, damage, dan efek dikirim melalui frame gameplay terpisah agar traffic tidak melonjak menjadi satu snapshot setiap tick.
 - Perangkat coarse/low-end (misalnya perangkat dengan memory sekitar 4 GB) otomatis memakai batas pixel lebih rendah, tanpa AO/bloom dan tanpa projectile trail jaringan untuk mengurangi stutter.
 - PWA single-player, WebGL2 sebagai renderer default, WebGPU eksperimental opt-in, desktop controls, mobile multi-touch, dan mode left-handed tetap dipertahankan.
@@ -100,7 +104,7 @@ Fitur yang memang belum termasuk scope saat ini adalah akun/database, progressio
 
 ### Protocol aktual
 
-Frame dikirim sebagai JSON melalui satu koneksi WebSocket native. Event client yang tersedia mencakup `session:hello`, `room:create`, `room:join`, `room:leave`, `lobby:update-settings`, `lobby:select-character`, `lobby:ready`, `lobby:start`, `input:move`, `action:attack-start`, `action:attack-release`, `action:super`, `action:item`, `action:flicker`, `match:leave`, dan `latency:ping`.
+Frame dikirim sebagai JSON melalui satu koneksi WebSocket native. Event client yang tersedia mencakup `session:hello`, `room:create`, `room:join`, `room:leave`, `lobby:update-settings`, `lobby:select-character`, `lobby:ready`, `lobby:start`, `input:move`, `action:attack-start`, `action:attack-release`, `action:skill`, `action:super`, `action:item`, `action:flicker`, `match:leave`, dan `latency:ping`.
 
 Event server yang dikirim mencakup `session:accepted`, `session:recovered`, `room:joined`, `room:state`, `room:error`, `match:init`, `match:snapshot`, `match:event`, `match:end`, dan `latency:pong`. Payload divalidasi dengan schema, action memakai `actionId` untuk deduplication, dan protocol version saat ini adalah `1`.
 
@@ -115,7 +119,9 @@ npm test -- --run tests/server tests/shared
 npm test -- --run
 ```
 
-Verifikasi update kontrol, trap, dan grafis: `npm run build`, `npm run test:characters`, `npm test -- --run` (23 file, 92 test), pemeriksaan sintaks engine, dan `git diff --check` lulus. Test karakter memeriksa roster Deathmatch maksimal dua bot per karakter pada 65 seed, perilaku solo untuk item/cooldown Flicker/trap berkala, penurunan kualitas otomatis saat Ultra manual berjalan 5 FPS, pencegahan trap lokal palsu di multiplayer, animasi dan efek super multiplayer, serta penggunaan ulang dan pembersihan aset visual jaringan. Build terbaru berukuran 3.015.523 byte untuk `dist/`, dengan bundle WebGPU 781,37 kB (212,55 kB gzip) dan bundle aplikasi 31,25 kB (11,04 kB gzip). Freeze yang sesekali muncul pada GPU dan map tertentu masih perlu diuji langsung di perangkat yang mengalaminya; test otomatis tidak membuktikan masalah tersebut hilang sepenuhnya.
+Verifikasi terbaru, 25 September 2026: `npm run build`, `npm run test:characters`, `npm test -- --run` (23 file, 99 test), dan `git diff --check` lulus. Verifier karakter mencakup 10 rig gameplay dan dua design rig, paritas nama/stat/skill/Super Gojo-Sukuna, roster Deathmatch seeded, item/Flicker/trap solo, efek Blue solo dan multiplayer, serta visual tangan Gojo/Sukuna. Build berisi 27 file dengan total 2.770.692 byte; bundle WebGPU 781,37 kB (212,55 kB gzip) dan aplikasi 33,97 kB (11,92 kB gzip). Vite masih memberi peringatan chunk WebGPU di atas 500 kB. Smoke test browser pada build bersih memastikan Gojo dan Sukuna muncul di roster, tombol skill Gojo tampil di desktop, dan Blue masuk cooldown setelah dipakai. Uji multiplayer dua perangkat, touch langsung, soak test, dan balance playtest belum divalidasi pada run ini.
+
+Pembaruan gameplay Gojo/Sukuna, 25 September 2026: timer Blue solo kini benar-benar mengakhiri tarikan setelah 1,4 detik dan menghapus efek slow/orb; renderer multiplayer juga menampilkan serta mem-fade orb dari timer authoritative. Nama basic, pasif, dua skill, dan Super dikembalikan ke nama resmi yang diminta. Skill 1/2 terlihat di desktop dan touch dengan state cooldown/charge, warna masing-masing karakter, serta drag-to-aim pada touch. Gojo membawa Blue/Red yang bercahaya; Sukuna membawa api di kedua tangan. Petunjuk “Drag to Aim” dan toast bawah pickup/pemakaian item tidak tampil saat match agar kontrol utility tidak tertutup.
 
 Benchmark sintetis delapan pemain yang tercatat sebelumnya adalah baseline sebelum snapshot trap berkala: snapshot 15 Hz, trafik sekitar 62,5 KB/detik/client saat diam dan 169,2 KB/detik/client saat semua pemain menembak, dengan p95 simulasi plus satu serialisasi snapshot sekitar 0,29 ms. Trafik multiplayer setelah penambahan snapshot trap belum diukur ulang.
 
@@ -149,6 +155,7 @@ scripts/service-worker.js      template/cache service worker
 public/engine/
   three-legacy.js              Three.js r186 dan roster baseline
   character-roster.js          visual roster and solo renderer extensions
+  sorcerer-models.js           rig Gojo dan Sukuna untuk kedua mode
   render-pipeline.js            renderer, kualitas, shadow, dan post-process
   map-biomes.js                data biome dan aturan permukaan arena
   world.js                     arena, collision, cover, dan objek dunia
@@ -161,7 +168,7 @@ public/engine/
 
 File engine dimuat sebagai script klasik berurutan karena beberapa kelas Three.js dan gameplay memakai namespace global. `three-legacy.js` menyimpan library serta lima karakter baseline lama; data karakter yang direvisi ditimpa di `character-roster.js`.
 
-`shared/data/characters.js` adalah sumber identitas dan aturan gameplay untuk multiplayer. Display name yang dipakai kedua mode adalah: `dusty` = **Athallah**, `ace` = **Zeyd**, `fuse` = **Azka**, `titan` = **Einar**, `volt` = **Nopal**, `naka` = **Naka**, `ello` = **Ello**, dan `syafiah` = **Syafiah**. Multiplayer menyimpan ID lowercase tersebut di protocol, tetapi lobby dan snapshot menampilkan display name.
+`shared/data/characters.js` adalah sumber identitas dan aturan gameplay untuk multiplayer; `character-roster.js` memuat padanan data engine solo. Display name yang dipakai kedua mode adalah: `dusty` = **Athallah**, `ace` = **Zeyd**, `fuse` = **Azka**, `titan` = **Einar**, `volt` = **Nopal**, `naka` = **Naka**, `ello` = **Ello**, `syafiah` = **Syafiah**, `gojo` = **Gojo**, dan `sukuna` = **Sukuna**. Multiplayer menyimpan ID lowercase tersebut di protocol, tetapi lobby dan snapshot menampilkan display name.
 
 ## Roster aktual
 
@@ -175,6 +182,8 @@ File engine dimuat sebagai script klasik berurutan karena beberapa kelas Three.j
 | Naka | 3200 | 3.90 | 3 × 280 shuriken | 7.0 | Shadow Rush 900, dash 6.0, shuriken kembali |
 | Ello | 5500 | 3.30 | Combo 550 / 650 / 800 | 2.9 | Iaido 1100 atau 1500 setelah parry |
 | Syafiah | 2900 | 3.20 | Charge 650–1050 | 10.0–12.5 | Arrow Shower 5 × 250 |
+| Gojo | 3000 | 3.25 | Limitless Strike, combo 350 / 350 / 600 | 2.8 | Domain Expansion - Infinite Void, freeze 1.5 dtk, radius 3.8 |
+| Sukuna | 4200 | 3.25 | Cleave, melee cone 450, 3 ammo | 3.0 | Domain Expansion - Malevolent Shrine, 8 × 180, radius 4.5 |
 
 ### Perubahan combat utama
 
@@ -186,6 +195,9 @@ File engine dimuat sebagai script klasik berurutan karena beberapa kelas Three.j
 - **Nopal:** Basic menembakkan 3 projectile listrik dengan damage 380 per projectile.
 - **Naka:** Triple Shuriken menimbulkan 280 damage per shuriken.
 - **Einar:** HP dan damage tetap; speed menjadi 3,25 dan reload menjadi 1 detik.
+- **Gojo:** **Infinity Barrier**; Basic Attack **Limitless Strike (Melee Combo)**; Skill 1 **Cursed Technique Lapse - Blue** (orb menarik selama 1,4 detik); Skill 2 **Cursed Technique Reversal - Red**; Super **Domain Expansion - Infinite Void**. Barrier yang siap juga menyerap satu efek hard CC tanpa damage.
+- **Sukuna:** **Reverse Cursed Technique**; Basic Attack **Cleave (Melee Cone)**; Skill 1 **Dismantle** (maksimal tiga target); Skill 2 **Fuga - Kamino / Flame Arrow** (tap atau charge); Super **Domain Expansion - Malevolent Shrine**.
+- Gojo/Sukuna memiliki tombol skill yang menampilkan nama pendek, warna karakter, cooldown/charge, serta state `READY`/`WAIT` di desktop dan touch. Tombol touch mendukung drag-to-aim; Fuga memperlihatkan jangkauan tap atau ledak charge. Gojo membawa orb Blue dan Red pada tangan; Sukuna membawa api Fuga pada kedua tangan. Rig dipakai di solo dan multiplayer.
 
 Athallah tetap menjadi baseline pass ini. Item `ammo` berubah menjadi **Focus** yang mengisi 20% Super untuk Ello dan Syafiah; karakter lain tetap menerima ammo refill.
 
@@ -270,4 +282,10 @@ npm run test:characters
 npm run build
 ```
 
-Build menulis output ke `dist/`. Ukuran bundle vendor WebGPU Three.js dapat memunculkan peringatan ukuran chunk dari Vite; ini tidak menghentikan build. Verifikasi lokal 24 September 2026: 23 file test dan 92 test lulus; pemeriksaan rig karakter lulus; build menghasilkan 22 file berukuran total 3.015.523 byte. Browser desktop berjalan 60 FPS tanpa error console. Layout mobile diperiksa pada viewport 1280 × 540: Attack 112 px dan Super/Skill 1/Skill 2 masing-masing 68 px, mengikuti posisi arc referensi. Pengguna melaporkan Redmi 12C kini berjalan di atas 40 FPS; pengukuran ulang Poco F6 dan uji sentuh langsung untuk tombol baru masih menunggu.
+Build menulis output ke `dist/`. Ukuran bundle vendor WebGPU Three.js dapat memunculkan peringatan ukuran chunk dari Vite; ini tidak menghentikan build. Sebelum Character Studio ditambahkan pada 24 September 2026, 23 file test dan 92 test lulus, pemeriksaan rig karakter lulus, dan build menghasilkan 22 file berukuran total 3.015.523 byte. Browser desktop berjalan 60 FPS tanpa error console. Layout mobile diperiksa pada viewport 1280 × 540: Attack 112 px dan Super/Skill 1/Skill 2 masing-masing 68 px, mengikuti posisi arc referensi. Pengguna melaporkan Redmi 12C kini berjalan di atas 40 FPS; pengukuran ulang Poco F6 dan uji sentuh langsung untuk tombol baru masih menunggu.
+
+Pembaruan desain Gojo dan Sukuna, 24 September 2026: preview Character Studio diperiksa pada tampak depan, samping, belakang, serta animasi Cast. `npm.cmd run build` lulus dan menghasilkan 27 file dengan total 3.048.666 byte; chunk WebGPU Three.js berukuran 781,37 kB (212,55 kB gzip) dan tetap memunculkan peringatan batas 500 kB dari Vite. `git diff --check` lulus. Suite test dan pemeriksaan rig tidak dijalankan ulang setelah perubahan visual ini.
+
+Pembaruan Character Studio, 24 September 2026: galeri audit memuat delapan roster aktif serta redesign Gojo dan Sukuna dalam 10 kartu thumbnail yang dibuat dari rig Three.js, dan kartu membuka model terpilih di panggung interaktif. `npm.cmd run build` lulus dengan 27 file berukuran 3.053.566 byte; bundle aplikasi 30,65 kB (10,80 kB gzip), studio 7,47 kB (3,29 kB gzip), serta WebGPU Three.js 781,37 kB (212,55 kB gzip; peringatan chunk di atas 500 kB). Screenshot browser memverifikasi panggung duo kembali tampil setelah pembuatan thumbnail, 10 kartu siap, dan seleksi Gojo serta Dusty bekerja. `git diff --check` lulus; test dan pemeriksaan rig tidak dijalankan ulang.
+
+Implementasi stat/skill Gojo dan Sukuna, 25 September 2026: build, 99 test otomatis, test rig/parity, dan pemeriksaan diff lulus. Audit parity juga menyamakan invulnerability serta damage saat mendarat pada Super leap Titan antara solo dan multiplayer, termasuk durasi low-gravity. Lihat angka build dan batas verifikasi terbaru pada [Verifikasi aktual](#verifikasi-aktual). Ikon transparan diregenerasi dari artwork master `output/imagegen/` dan dipakai oleh semua varian ikon PWA.

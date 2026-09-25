@@ -3,7 +3,7 @@ import { MapCollision } from '../maps/MapCollision.js';
 import { characterMaxAmmo, characterUsesAmmo, getCharacterDef } from '../data/characters.js';
 import { createSimulationState } from './SimulationState.js';
 import { stepMovement } from './MovementSystem.js';
-import { beginAttack, releaseAttack, resolveIaido, stepAreaEffects, stepBursts, stepCharacterEffects, stepItems, stepLeaps, stepProjectiles, useFlicker, useItem, useSkill, useSuper, applyDamage } from './CombatSystem.js';
+import { beginAttack, releaseAttack, resolveIaido, stepAreaEffects, stepBursts, stepCharacterEffects, stepItems, stepLeaps, stepProjectiles, stepSkillDashes, stepSkillTraps, useFlicker, useItem, useSkill, useSuper, applyDamage } from './CombatSystem.js';
 
 export class GameSimulation {
   constructor(options = {}) {
@@ -125,10 +125,12 @@ export class GameSimulation {
       if (nextInput) player.input = nextInput;
     }
     stepMovement(this.state, dt, this.collision);
+    stepSkillDashes(this.state);
     stepLeaps(this.state, dt);
     stepProjectiles(this.state, dt);
     stepAreaEffects(this.state, dt);
     stepCharacterEffects(this.state, dt);
+    stepSkillTraps(this.state, dt);
     stepItems(this.state, dt);
     this.applyHazards(dt);
     this.stepTimedTraps(dt);
@@ -243,7 +245,9 @@ export class GameSimulation {
       player.sukunaBasicHits?.clear();
       player.sukunaRushT = 0;
       player.gojoBarrier = false;
-      player.gojoBarrierReadyAt = this.state.match.elapsed + 10;
+      player.gojoBarrierReadyAt = this.state.match.elapsed + 5;
+      player.skillDashState = null;
+      player.skillTraps && [...this.state.skillTraps].forEach(([id, trap]) => { if (trap.ownerId === player.id) this.state.skillTraps.delete(id); });
       this.state.events.push({ type: 'RESPAWN', playerId: player.id, x: player.x, z: player.z });
     }
   }

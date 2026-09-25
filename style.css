@@ -279,6 +279,7 @@ body.touch #action-cluster.has-skills .skill-state{position:absolute;top:31px;ma
 body.touch #action-cluster.has-skills .skill-reserved kbd{display:none}
 #action-cluster.has-skills .skill-reserved:disabled{filter:saturate(.84);opacity:.9}
 #action-cluster.has-skills .skill-reserved.ready{border-color:#fff;color:#fff;box-shadow:0 5px #080d20,inset 0 2px #ffffff80,0 0 18px var(--skill-color)}
+#action-cluster.has-skills .skill-reserved.recast{border-color:#f6ffdf;color:#fff;box-shadow:0 5px #080d20,inset 0 2px #ffffff90,0 0 20px #dfffb0}
 #action-cluster.has-skills .skill-reserved.charging{border-color:#fff;background:conic-gradient(var(--skill-color) calc(var(--charge,0) * 100%),#10172a 0);box-shadow:0 5px #080d20,inset 0 2px #ffffff80,0 0 19px var(--skill-color)}
 #action-cluster.has-skills .skill-reserved.waiting{filter:saturate(.8);opacity:.78}
 #action-cluster.has-skills .skill-reserved:active{transform:scale(.96)}

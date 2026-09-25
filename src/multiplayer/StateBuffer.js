@@ -39,22 +39,34 @@ export class StateBuffer {
 }
 
 function extrapolateSnapshot(snapshot, seconds) {
+  const players = (snapshot.players || []).map((player) => ({
+    ...player,
+    x: player.x + (player.velX || 0) * seconds,
+    z: player.z + (player.velZ || 0) * seconds,
+  }));
+  const playersById = new Map(players.map((player) => [player.id, player]));
   return {
     ...snapshot,
-    players: (snapshot.players || []).map((player) => ({
-      ...player,
-      x: player.x + (player.velX || 0) * seconds,
-      z: player.z + (player.velZ || 0) * seconds,
-    })),
-    projectiles: (snapshot.projectiles || []).map((projectile) => ({
-      ...projectile,
-      x: Number.isFinite(projectile.dirX) && Number.isFinite(projectile.speed)
-        ? projectile.x + projectile.dirX * projectile.speed * seconds
-        : projectile.x,
-      z: Number.isFinite(projectile.dirZ) && Number.isFinite(projectile.speed)
-        ? projectile.z + projectile.dirZ * projectile.speed * seconds
-        : projectile.z,
-    })),
+    players,
+    projectiles: (snapshot.projectiles || []).map((projectile) => {
+      if (projectile.stickyTargetId) {
+        const target = playersById.get(projectile.stickyTargetId);
+        return {
+          ...projectile,
+          x: target ? target.x + (projectile.stickyOffsetX || 0) : projectile.x,
+          z: target ? target.z + (projectile.stickyOffsetZ || 0) : projectile.z,
+        };
+      }
+      return {
+        ...projectile,
+        x: Number.isFinite(projectile.dirX) && Number.isFinite(projectile.speed)
+          ? projectile.x + projectile.dirX * projectile.speed * seconds
+          : projectile.x,
+        z: Number.isFinite(projectile.dirZ) && Number.isFinite(projectile.speed)
+          ? projectile.z + projectile.dirZ * projectile.speed * seconds
+          : projectile.z,
+      };
+    }),
   };
 }
 

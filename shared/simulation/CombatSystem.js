@@ -6,10 +6,11 @@ let areaSerial = 0;
 
 export function beginAttack(state, playerId, aimX, aimZ) {
   const player = state.players.get(playerId);
-  if (!player || !player.alive || player.attackCooldown > 0 || player.burstState || player.flickerState || player.airborneT > 0 || player.spawnProtectionT > 0 || player.hardCCT > 0 || player.skill2Charge) return false;
+  if (!player || !player.alive || player.attackCooldown > 0 || player.burstState || player.flickerState || player.skillDashState || player.airborneT > 0 || player.spawnProtectionT > 0 || player.hardCCT > 0 || player.skill2Charge) return false;
   const attack = getCharacterDef(player.characterId).attack;
   if (characterUsesAmmo(player.characterId) && player.ammo < 1) return false;
   const direction = resolveAim(player, aimX, aimZ);
+  cancelStealthForAction(state, player);
   player.input.aimX = direction.x;
   player.input.aimZ = direction.z;
   player.facing = Math.atan2(direction.x, direction.z);
@@ -24,7 +25,7 @@ export function beginAttack(state, playerId, aimX, aimZ) {
 
 export function releaseAttack(state, playerId, aimX, aimZ) {
   const player = state.players.get(playerId);
-  if (!player || !player.alive || player.characterId !== 'syafiah' || player.chargeStartedAt === null) return false;
+  if (!player || !player.alive || player.characterId !== 'syafiah' || player.chargeStartedAt === null || player.skillDashState) return false;
   const attack = getCharacterDef(player.characterId).attack;
   const duration = Math.max(0, state.match.elapsed - player.chargeStartedAt);
   player.chargeStartedAt = null;
@@ -35,6 +36,10 @@ export function releaseAttack(state, playerId, aimX, aimZ) {
     speed: attack.speed + (attack.maxSpeed - attack.speed) * ratio,
     range: attack.range + (attack.maxRange - attack.range) * ratio,
   };
+  if (duration >= attack.chargeTime * 0.9 && player.pierceCoverShots > 0) {
+    charged.pierceCover = true;
+    player.pierceCoverShots -= 1;
+  }
   if (state.collision?.surfaceAt?.(player.x, player.z) === 'low-gravity') {
     charged.range *= attack.terrainAffinity?.rangeMultiplier || getCharacterDef(player.characterId).terrainAffinity?.rangeMultiplier || 1.1;
   }
@@ -50,8 +55,9 @@ export function releaseAttack(state, playerId, aimX, aimZ) {
 export function useSuper(state, playerId, payload = {}) {
   const player = state.players.get(playerId);
   const definition = player && getCharacterDef(player.characterId).super;
-  if (!player || !definition || !player.alive || player.burstState || player.flickerState || player.airborneT > 0 || player.superCharge < 1 || player.spawnProtectionT > 0 || player.hardCCT > 0 || player.skill2Charge) return false;
+  if (!player || !definition || !player.alive || player.burstState || player.flickerState || player.skillDashState || player.airborneT > 0 || player.superCharge < 1 || player.spawnProtectionT > 0 || player.hardCCT > 0 || player.skill2Charge) return false;
   const direction = resolveAim(player, payload.aimX, payload.aimZ);
+  cancelStealthForAction(state, player);
   player.input.aimX = direction.x;
   player.input.aimZ = direction.z;
   player.facing = Math.atan2(direction.x, direction.z);
@@ -78,8 +84,14 @@ export function useSkill(state, playerId, payload = {}) {
   const skillNumber = payload.skill === 2 ? 2 : payload.skill === 1 ? 1 : 0;
   const phase = payload.phase || 'activate';
   const definition = player && getCharacterDef(player.characterId).skills?.[skillNumber - 1];
-  if (!player || !definition || !player.alive || player.flickerState || player.airborneT > 0 || player.spawnProtectionT > 0 || player.hardCCT > 0 || player.burstState) return false;
+  if (!player || !definition || !player.alive || player.flickerState || player.skillDashState || player.airborneT > 0 || player.spawnProtectionT > 0 || player.hardCCT > 0 || player.burstState) return false;
   player.skillCooldowns ||= [0, 0];
+
+  if (definition.id === 'kunai-dash' && phase === 'activate' && player.kunaiRecastTargetId && player.kunaiRecastUntil > state.match.elapsed) {
+    const recast = recastKunai(state, player, definition);
+    if (recast) cancelStealthForAction(state, player);
+    return recast;
+  }
 
   if (player.characterId === 'sukuna' && skillNumber === 2) {
     if (phase === 'start') {
@@ -115,6 +127,10 @@ export function useSkill(state, playerId, payload = {}) {
 
   if (phase !== 'activate' || player.skillCooldowns[skillNumber - 1] > 0) return false;
   const direction = resolveAim(player, payload.aimX, payload.aimZ);
+  const dashRequest = getRosterDashRequest(definition, direction);
+  const dashPlan = dashRequest ? createSkillDashPlan(state, player, dashRequest) : null;
+  if (dashRequest && !dashPlan) return false;
+  cancelStealthForAction(state, player);
   player.input.aimX = direction.x; player.input.aimZ = direction.z;
   player.facing = Math.atan2(direction.x, direction.z);
   player.skillCooldowns[skillNumber - 1] = definition.cooldown;
@@ -173,7 +189,171 @@ export function useSkill(state, playerId, payload = {}) {
     state.events.push({ type: 'SKILL_SLASH', ownerId: player.id, skill: 1, fromX: player.x, fromZ: player.z, toX: end.x, toZ: end.z, color: 0xe52d45 });
     return true;
   }
+  return useRosterSkill(state, player, definition, skillNumber, direction, dashPlan);
+}
+
+function getRosterDashRequest(definition, direction) {
+  if (['combat-slide', 'tactical-roll', 'iron-charge', 'swift-flash'].includes(definition.id)) {
+    return { direction, distance: definition.distance, duration: definition.duration };
+  }
+  if (definition.id === 'caltrops-trap') {
+    return { direction: { x: -direction.x, z: -direction.z }, distance: definition.retreatDistance, duration: 0.28 };
+  }
+  return null;
+}
+
+function createSkillDashPlan(state, player, request) {
+  const dir = normalize2(request.direction.x, request.direction.z);
+  if (Math.hypot(dir.x, dir.z) <= 1e-8) return null;
+  const end = clippedEndpoint(state, player.x, player.z, player.x + dir.x * request.distance, player.z + dir.z * request.distance, 0.45);
+  const distance = Math.hypot(end.x - player.x, end.z - player.z);
+  if (distance <= 0.08) return null;
+  return { dirX: dir.x, dirZ: dir.z, distance, duration: request.duration, toX: end.x, toZ: end.z };
+}
+
+function useRosterSkill(state, player, definition, skillNumber, direction, dashPlan) {
+  const id = definition.id;
+  if (id === 'combat-slide' || id === 'tactical-roll' || id === 'iron-charge' || id === 'swift-flash') {
+    if (!startSkillDash(state, player, definition, skillNumber, dashPlan)) return false;
+    if (definition.damageReduction) {
+      player.damageReduction = definition.damageReduction;
+      player.damageReductionT = definition.duration;
+    }
+    if (definition.ccImmune) player.ccImmuneT = definition.duration;
+    return true;
+  }
+  if (id === 'concussive-shell') {
+    const cosArc = Math.cos(definition.arc / 2);
+    for (const target of state.players.values()) {
+      if (target.id === player.id || !target.alive || target.airborneT > 0) continue;
+      const dx = target.x - player.x; const dz = target.z - player.z; const distance = Math.hypot(dx, dz);
+      if (distance > definition.range + 0.45 || distance < 1e-8 || (dx * direction.x + dz * direction.z) / distance < cosArc) continue;
+      if (state.collision?.blocksSegment?.(player.x, player.z, target.x, target.z, 0.08)) continue;
+      const dealt = applyDamage(state, target, definition.damage, player);
+      if (dealt > 0 && !target.lastDamageBlocked && target.alive) {
+        const away = normalize2(dx, dz);
+        if (displaceTarget(state, target, away.x * definition.knockback, away.z * definition.knockback)) applyHardCC(state, target, definition.wallStun, 'stun', player);
+        state.events.push({ type: 'SKILL_HIT', ownerId: player.id, targetId: target.id, skill: skillNumber, damage: dealt });
+      }
+    }
+    state.events.push({ type: 'SKILL_ARC', ownerId: player.id, skill: skillNumber, x: player.x, z: player.z, facing: player.facing, range: definition.range, arc: definition.arc, color: definition.color });
+    return true;
+  }
+  if (id === 'piercing-bolt') {
+    const bolt = { kind: 'burst', count: 1, damage: definition.damage, speed: definition.speed, range: definition.range, radius: 0.15, color: 0x89dcff, pierce: true, pierceCover: true, defenseBreak: definition.defenseBreak, defenseBreakDuration: definition.defenseBreakDuration, noKnockback: true };
+    spawnProjectile(state, player, bolt, direction.x, direction.z);
+    return true;
+  }
+  if (id === 'sticky-grenade') {
+    const grenade = { kind: 'burst', count: 1, damage: definition.damage, speed: definition.speed, range: definition.range, radius: 0.18, color: definition.color, splashRadius: definition.blast, knockback: definition.knockback, stickyFuse: definition.fuse, stickyAttachToTarget: definition.attachToTarget, stickyAttachToCover: definition.attachToCover };
+    spawnProjectile(state, player, grenade, direction.x, direction.z);
+    return true;
+  }
+  if (id === 'smoke-screen') {
+    const areaId = `area_${state.tick}_${areaSerial += 1}`;
+    state.areaEffects.set(areaId, { id: areaId, ownerId: player.id, kind: 'smoke-screen', x: player.x, z: player.z, radius: definition.radius, color: definition.color, remaining: definition.duration, slow: definition.slow, hitIds: new Set() });
+    state.events.push({ type: 'SKILL_ZONE', id: areaId, ownerId: player.id, kind: 'smoke-screen', x: player.x, z: player.z, radius: definition.radius, duration: definition.duration, color: definition.color });
+    return true;
+  }
+  if (id === 'taunt-echo') {
+    player.tauntEchoT = definition.duration;
+    player.tauntEchoRadius = definition.radius;
+    player.tauntEchoSlow = definition.slowAway;
+    player.damageReduction = definition.damageReduction;
+    player.damageReductionT = definition.duration;
+    state.events.push({ type: 'SKILL_AURA', ownerId: player.id, skill: skillNumber, duration: definition.duration, radius: definition.radius, color: definition.color });
+    return true;
+  }
+  if (id === 'chain-lightning') {
+    const candidates = [...state.players.values()].filter((target) => {
+      if (target.id === player.id || !target.alive || target.airborneT > 0) return false;
+      const dx = target.x - player.x; const dz = target.z - player.z; const distance = Math.hypot(dx, dz);
+      return distance <= definition.range + 0.45 && distance > 1e-8 && (dx * direction.x + dz * direction.z) / distance >= 0.78 && !state.collision?.blocksSegment?.(player.x, player.z, target.x, target.z, 0.08);
+    }).sort((a, b) => Math.hypot(a.x - player.x, a.z - player.z) - Math.hypot(b.x - player.x, b.z - player.z));
+    const hitIds = new Set();
+    let current = candidates[0];
+    if (current) {
+      hitIds.add(current.id);
+      const dealt = applyDamage(state, current, definition.damage, player);
+      if (dealt > 0 && !current.lastDamageBlocked) applyHardCC(state, current, definition.interruptDuration, 'stun', player);
+      state.events.push({ type: 'SKILL_CHAIN_HIT', ownerId: player.id, targetId: current.id, skill: skillNumber, damage: dealt, jump: 0, color: definition.color });
+      for (let jump = 1; jump <= definition.jumpCount; jump += 1) {
+        const origin = current;
+        current = [...state.players.values()].filter((target) => target.alive && target.airborneT <= 0 && !hitIds.has(target.id) && target.id !== player.id && Math.hypot(target.x - origin.x, target.z - origin.z) <= definition.jumpRange && !state.collision?.blocksSegment?.(origin.x, origin.z, target.x, target.z, 0.08)).sort((a, b) => Math.hypot(a.x - origin.x, a.z - origin.z) - Math.hypot(b.x - origin.x, b.z - origin.z))[0];
+        if (!current) break;
+        hitIds.add(current.id);
+        const jumpDamage = applyDamage(state, current, definition.jumpDamage, player);
+        if (jumpDamage > 0 && !current.lastDamageBlocked) applyHardCC(state, current, definition.interruptDuration, 'stun', player);
+        state.events.push({ type: 'SKILL_CHAIN_HIT', ownerId: player.id, targetId: current.id, skill: skillNumber, damage: jumpDamage, jump, color: definition.color });
+      }
+    }
+    return true;
+  }
+  if (id === 'overcharge-volt') {
+    player.overchargeT = definition.duration;
+    state.events.push({ type: 'SKILL_STATUS', ownerId: player.id, skill: skillNumber, status: 'overcharge', duration: definition.duration, color: definition.color });
+    return true;
+  }
+  if (id === 'smoke-bomb') {
+    player.stealthT = definition.duration;
+    state.events.push({ type: 'SKILL_STATUS', ownerId: player.id, skill: skillNumber, status: 'stealth', duration: definition.duration, color: definition.color });
+    return true;
+  }
+  if (id === 'kunai-dash') {
+    const projectile = spawnProjectile(state, player, { kind: 'burst', count: 1, damage: definition.damage, speed: definition.speed, range: definition.range, radius: 0.12, color: definition.color, noKnockback: true, kunaiSkill: true }, direction.x, direction.z);
+    player.kunaiRecastTargetId = null;
+    player.kunaiRecastUntil = state.match.elapsed + definition.recastWindow;
+    if (projectile) projectile.kunaiSkill = true;
+    return true;
+  }
+  if (id === 'parry-stance') {
+    player.skillParryT = definition.duration;
+    player.skillParryFacing = player.facing;
+    state.events.push({ type: 'SKILL_PARRY_WINDOW', ownerId: player.id, skill: skillNumber, duration: definition.duration, color: definition.color });
+    return true;
+  }
+  if (id === 'eagle-eye') {
+    player.eagleEyeT = definition.duration;
+    player.pierceCoverShots = definition.pierceDestructibleCover;
+    state.events.push({ type: 'SKILL_STATUS', ownerId: player.id, skill: skillNumber, status: 'eagle-eye', duration: definition.duration, color: definition.color });
+    return true;
+  }
+  if (id === 'caltrops-trap') {
+    if (!startSkillDash(state, player, definition, skillNumber, dashPlan)) return false;
+    const trapId = `skill_trap_${state.tick}_${areaSerial += 1}`;
+    state.skillTraps.set(trapId, { id: trapId, kind: 'caltrops', ownerId: player.id, x: player.x, z: player.z, radius: definition.radius, remaining: definition.trapDuration, slow: definition.slow, damagePerSecond: definition.damagePerSecond, damageDuration: definition.damageDuration, hitIds: new Set(), phase: 'armed' });
+    state.events.push({ type: 'SKILL_TRAP_SET', id: trapId, kind: 'caltrops', ownerId: player.id, x: player.x, z: player.z, radius: definition.radius, remaining: definition.trapDuration, color: definition.color });
+    return true;
+  }
   return false;
+}
+
+function startSkillDash(state, player, definition, skill, plan) {
+  if (!plan) return false;
+  const { dirX, dirZ, distance, duration, toX, toZ } = plan;
+  player.skillDashState = { skillId: definition.id, skill, fromX: player.x, fromZ: player.z, toX, toZ, dirX, dirZ, distance, duration, elapsed: 0, previousX: player.x, previousZ: player.z, hitIds: [], damage: definition.damage || 0, knockback: definition.knockback || 0, restoreAmmo: definition.restoreAmmo || 0 };
+  state.events.push({ type: 'SKILL_DASH', ownerId: player.id, skill, skillId: definition.id, fromX: player.x, fromZ: player.z, toX, toZ, duration, leap: false });
+  return true;
+}
+
+function recastKunai(state, player, definition) {
+  const target = state.players.get(player.kunaiRecastTargetId);
+  if (!target?.alive || target.airborneT > 0) { player.kunaiRecastTargetId = null; return false; }
+  const targetX = target.x - Math.sin(target.facing) * definition.dashOffset;
+  const targetZ = target.z - Math.cos(target.facing) * definition.dashOffset;
+  const plan = createSkillDashPlan(state, player, { direction: { x: targetX - player.x, z: targetZ - player.z }, distance: Math.hypot(targetX - player.x, targetZ - player.z), duration: 0.12 });
+  if (!startSkillDash(state, player, { ...definition, id: 'kunai-recast' }, 2, plan)) return false;
+  player.kunaiRecastTargetId = null;
+  player.kunaiRecastUntil = 0;
+  return true;
+}
+
+function cancelStealthForAction(state, player) {
+  if (player.stealthT > 0) {
+    player.stealthT = 0;
+    state.events.push({ type: 'STEALTH_END', ownerId: player.id });
+  }
+  if (player.smokeConcealed) player.smokeRevealT = 0.5;
 }
 
 function spawnSukunaFlame(state, player, direction, damage, range, chargedDefinition) {
@@ -226,17 +406,42 @@ function applySlowEffect(target, sourceId, multiplier, duration) {
 }
 
 function applyHardCC(state, target, duration, kind, attacker) {
-  if (!target?.alive || target.spawnProtectionT > 0 || target.flickerInvulnT > 0 || target.airborneT > 0) return;
+  if (!target?.alive || target.spawnProtectionT > 0 || target.flickerInvulnT > 0 || target.airborneT > 0 || target.ccImmuneT > 0) return;
   if (consumeGojoBarrier(state, target, attacker)) return;
+  if (consumeSkillParry(state, target, attacker)) return;
   const base = Math.max(0, Math.min(1.5, duration));
   const adjusted = target.hardCCRecoveryT > 0 ? base * 0.65 : base;
   target.hardCCT = Math.max(target.hardCCT || 0, adjusted);
   target.hardCCRecoveryT = target.hardCCT + 2;
+  interruptCharge(state, target);
+  state.events.push({ type: 'HARD_CC', targetId: target.id, attackerId: attacker?.id || null, kind, duration: adjusted });
+}
+
+function interruptCharge(state, target) {
   if (target.skill2Charge) {
     target.skill2Charge = null;
-    state.events.push({ type: 'SKILL_CHARGE_CANCEL', ownerId: target.id, skill: 2, reason: 'hard-cc' });
+    state.events.push({ type: 'SKILL_CHARGE_CANCEL', ownerId: target.id, skill: 2, reason: 'interrupted' });
   }
-  state.events.push({ type: 'HARD_CC', targetId: target.id, attackerId: attacker?.id || null, kind, duration: adjusted });
+  if (target.chargeStartedAt !== null && target.chargeStartedAt !== undefined) {
+    target.chargeStartedAt = null;
+    state.events.push({ type: 'ATTACK_CHARGE_CANCEL', ownerId: target.id, reason: 'interrupted' });
+  }
+}
+
+function consumeSkillParry(state, target, attacker, incoming = null) {
+  if (!attacker || attacker.id === target.id || target.characterId !== 'ello' || target.skillParryT <= 0) return false;
+  const hasIncomingDirection = Number.isFinite(incoming?.directionX) && Number.isFinite(incoming?.directionZ) && Math.hypot(incoming.directionX, incoming.directionZ) > 1e-8;
+  const toSource = hasIncomingDirection
+    ? normalize2(-incoming.directionX, -incoming.directionZ)
+    : normalize2(attacker.x - target.x, attacker.z - target.z);
+  const faceX = Math.sin(target.skillParryFacing || 0);
+  const faceZ = Math.cos(target.skillParryFacing || 0);
+  if (toSource.x * faceX + toSource.z * faceZ < Math.cos(Math.PI / 3)) return false;
+  target.skillParryT = 0;
+  target.parryEmpowerT = 2;
+  target.iaidoEmpowered = true;
+  state.events.push({ type: 'SKILL_PARRY', ownerId: target.id, attackerId: attacker.id, empowered: true });
+  return true;
 }
 
 function applyBleed(target, owner, damage, duration) {
@@ -265,7 +470,7 @@ function applyBurn(target, owner, damage, duration) {
 function detonateSukunaFlame(state, projectile, owner, x, z) {
   for (const target of state.players.values()) {
     if (target.id === projectile.ownerId || !target.alive || Math.hypot(target.x - x, target.z - z) > projectile.splashRadius + 0.45) continue;
-    const dealt = applyDamage(state, target, projectile.damage, owner);
+    const dealt = applyDamage(state, target, projectile.damage, owner, { directionX: projectile.dirX, directionZ: projectile.dirZ, projectile: true });
     if (dealt > 0 && !target.lastDamageBlocked && target.alive && projectile.burnDamage > 0) {
       applyBurn(target, owner, projectile.burnDamage, projectile.burnDuration);
       state.events.push({ type: 'STATUS_APPLIED', targetId: target.id, sourceId: owner.id, status: 'burn', duration: projectile.burnDuration, damage: projectile.burnDamage });
@@ -326,7 +531,7 @@ export function useItem(state, playerId, slot = 0) {
 
 export function useFlicker(state, playerId, payload = {}) {
   const player = state.players.get(playerId);
-  if (!player || !player.alive || player.spawnProtectionT > 0 || player.hardCCT > 0 || player.airborneT > 0 || player.burstState || player.skill2Charge || player.flickerState) return false;
+  if (!player || !player.alive || player.spawnProtectionT > 0 || player.hardCCT > 0 || player.airborneT > 0 || player.burstState || player.skill2Charge || player.flickerState || player.skillDashState) return false;
   if ((player.flickerReadyAt ?? FLICKER.cooldown) > state.match.elapsed) return false;
   let direction = normalize2(payload.dirX ?? player.input.moveX, payload.dirZ ?? player.input.moveZ);
   if (Math.hypot(direction.x, direction.z) <= 1e-8) direction = normalize2(player.input.aimX, player.input.aimZ);
@@ -360,6 +565,7 @@ function performAttack(state, player, attack, direction) {
   player.attackCooldown = attack.cooldown || (attack.kind === 'lob' ? 0.3 : 0.22);
   player.lastCombat = state.match.elapsed;
   player.attackSerial = (player.attackSerial || 0) + 1;
+  if (player.characterId === 'volt' && player.overchargeT > 0) attack = { ...attack, count: 4, pellets: 4 };
   if (player.characterId === 'ace' && player.stationaryT >= 0.45) {
     attack = { ...attack, damage: Math.round(attack.damage * 1.1) };
     player.stationaryT = 0;
@@ -443,9 +649,11 @@ function executeSuper(state, player, attack, direction, targetX, targetZ) {
     return true;
   }
   if (attack.kind === 'iaido') {
+    player.skillParryT = 0;
     player.parryT = attack.guardDuration;
     player.iaidoState = { targetX, targetZ };
-    player.iaidoEmpowered = false;
+    player.iaidoEmpowered = player.parryEmpowerT > 0;
+    player.parryEmpowerT = 0;
     state.events.push({ type: 'PARRY_WINDOW', ownerId: player.id, duration: attack.guardDuration });
     return true;
   }
@@ -518,6 +726,18 @@ function spawnProjectile(state, player, attack, dirX, dirZ, isSuper = false) {
     returning: attack.returning === true,
     onReturn: false,
     pierce: attack.pierce === true,
+    pierceCover: attack.pierceCover === true,
+    pierceCoverRemaining: attack.pierceCover === true ? (attack.pierceCoverCount ?? 1) : 0,
+    defenseBreak: attack.defenseBreak || 0,
+    defenseBreakDuration: attack.defenseBreakDuration || 0,
+    stickyFuse: attack.stickyFuse || 0,
+    stickyFuseRemaining: attack.stickyFuse || 0,
+    stickyAttachToTarget: attack.stickyAttachToTarget === true,
+    stickyAttachToCover: attack.stickyAttachToCover === true,
+    stickyTargetId: null,
+    stickyOffsetX: 0,
+    stickyOffsetZ: 0,
+    kunaiSkill: attack.kunaiSkill === true,
     splashRadius: attack.splashRadius || attack.blast || 0,
     burnDamage: attack.burnDamage || 0,
     burnDuration: attack.burnDuration || 0,
@@ -530,6 +750,7 @@ function spawnProjectile(state, player, attack, dirX, dirZ, isSuper = false) {
   };
   state.projectiles.set(projectile.id, projectile);
   state.events.push({ type: 'PROJECTILE_SPAWN', projectile: serializeProjectile(projectile) });
+  return projectile;
 }
 
 function scheduleBurst(player, attack, direction, isSuper, cooldown = null) {
@@ -577,8 +798,78 @@ export function stepBursts(state, dt) {
   }
 }
 
+export function stepSkillDashes(state) {
+  for (const player of state.players.values()) {
+    const dash = player.skillDashState;
+    if (!dash) continue;
+    if (!player.alive) { player.skillDashState = null; continue; }
+    if (!(dash.distance > 0.08)) { player.skillDashState = null; continue; }
+    if (player.hardCCT > 0 || player.airborneT > 0) continue;
+    if (dash.skillId === 'iron-charge' || dash.skillId === 'swift-flash') {
+      for (const target of state.players.values()) {
+        if (target.id === player.id || !target.alive || target.airborneT > 0 || dash.hitIds.includes(target.id)) continue;
+        if (!segmentHitsCircle(dash.previousX, dash.previousZ, player.x, player.z, target.x, target.z, 0.32 + 0.45)) continue;
+        dash.hitIds.push(target.id);
+        const dealt = applyDamage(state, target, dash.damage, player);
+        if (dealt > 0 && !target.lastDamageBlocked && target.alive) {
+          const direction = normalize2(target.x - player.x, target.z - player.z);
+          if (dash.knockback > 0) displaceTarget(state, target, direction.x * dash.knockback, direction.z * dash.knockback);
+          if (dash.skillId === 'iron-charge') {
+            interruptCharge(state, target);
+            break;
+          }
+          state.events.push({ type: 'SKILL_HIT', ownerId: player.id, targetId: target.id, skill: dash.skill, damage: dealt });
+        }
+      }
+    }
+    if (dash.finished) {
+      if (dash.restoreAmmo > 0 && characterUsesAmmo(player.characterId)) player.ammo = Math.min(characterMaxAmmo(player.characterId), player.ammo + dash.restoreAmmo);
+      state.events.push({ type: 'SKILL_DASH_END', ownerId: player.id, skill: dash.skill, skillId: dash.skillId, x: player.x, z: player.z });
+      player.skillDashState = null;
+    }
+  }
+}
+
+export function stepSkillTraps(state, dt) {
+  for (const [id, trap] of state.skillTraps) {
+    trap.remaining = Math.max(0, trap.remaining - dt);
+    let triggered = false;
+    for (const target of state.players.values()) {
+      if (target.id === trap.ownerId || !target.alive || target.airborneT > 0 || trap.hitIds.has(target.id)) continue;
+      if (Math.hypot(target.x - trap.x, target.z - trap.z) > trap.radius + 0.45) continue;
+      trap.hitIds.add(target.id);
+      applySlowEffect(target, `caltrops:${trap.ownerId}`, trap.slow, trap.damageDuration);
+      target.bleeds ||= new Map();
+      target.bleeds.set(`caltrops:${trap.ownerId}`, { ownerId: trap.ownerId, damage: trap.damagePerSecond, remaining: trap.damageDuration, nextT: 1, ticksRemaining: Math.ceil(trap.damageDuration) });
+      state.events.push({ type: 'SKILL_TRAP_TRIGGERED', id, ownerId: trap.ownerId, targetId: target.id, x: trap.x, z: trap.z, color: 0xd2bd83 });
+      triggered = true;
+      break;
+    }
+    if (triggered || trap.remaining <= 0) {
+      state.skillTraps.delete(id);
+      if (!triggered) state.events.push({ type: 'SKILL_TRAP_END', id });
+    }
+  }
+}
+
 export function stepProjectiles(state, dt) {
   for (const [id, projectile] of state.projectiles) {
+    if (projectile.stickyFuse > 0 && projectile.stickyTargetId) {
+      const stuckTarget = state.players.get(projectile.stickyTargetId);
+      if (stuckTarget?.alive) {
+        projectile.x = stuckTarget.x + projectile.stickyOffsetX;
+        projectile.z = stuckTarget.z + projectile.stickyOffsetZ;
+      } else if (projectile.stickyTargetId !== 'cover') {
+        projectile.stickyTargetId = 'cover';
+      }
+      projectile.stickyFuseRemaining = Math.max(0, projectile.stickyFuseRemaining - dt);
+      if (projectile.stickyFuseRemaining <= 0) {
+        detonateSticky(state, projectile, state.players.get(projectile.ownerId));
+        state.projectiles.delete(id);
+        state.events.push({ type: 'PROJECTILE_DESTROY', projectileId: id, x: projectile.x, z: projectile.z, color: projectile.color });
+      }
+      continue;
+    }
     const previousX = projectile.x; const previousZ = projectile.z;
     const distance = projectile.speed * dt;
     projectile.x += projectile.dirX * distance; projectile.z += projectile.dirZ * distance; projectile.travelled += distance;
@@ -587,13 +878,28 @@ export function stepProjectiles(state, dt) {
       const arc = Math.max(0, Math.min(1, projectile.travelled / Math.max(0.001, projectile.range)));
       projectile.height = Math.sin(arc * Math.PI) * (projectile.isSuper ? 3.1 : 2.15);
     }
-    const hitWall = !projectile.lob && state.collision?.blocksSegment?.(previousX, previousZ, projectile.x, projectile.z, Math.max(0.03, projectile.radius * 0.35));
+    const projectileRadius = Math.max(0.03, projectile.radius * 0.35);
+    const blocker = !projectile.lob && (state.collision?.projectileBlocker
+      ? state.collision.projectileBlocker(previousX, previousZ, projectile.x, projectile.z, projectileRadius, projectile.piercedCoverTile)
+      : state.collision?.blocksSegment?.(previousX, previousZ, projectile.x, projectile.z, projectileRadius) ? { kind: 'solid' } : null);
+    let hitWall = !!blocker;
+    if (blocker?.kind === 'cover' && projectile.pierceCover && projectile.pierceCoverRemaining > 0) {
+      projectile.piercedCoverTile = { x: blocker.tileX, z: blocker.tileZ };
+      projectile.pierceCoverRemaining -= 1;
+      hitWall = false;
+    }
     if (hitWall) {
+      if (projectile.stickyFuse > 0 && projectile.stickyAttachToCover) {
+        projectile.stickyTargetId = 'cover';
+        projectile.stickyFuseRemaining = projectile.stickyFuse;
+        state.events.push({ type: 'SKILL_STICKY_ATTACH', projectileId: id, ownerId: projectile.ownerId, x: projectile.x, z: projectile.z, fuse: projectile.stickyFuse, color: projectile.color });
+        continue;
+      }
       if (projectile.splashRadius > 0) {
         const owner = state.players.get(projectile.ownerId);
         if (projectile.burnDamage > 0) detonateSukunaFlame(state, projectile, owner, projectile.x, projectile.z);
         else {
-          hitRadius(state, owner, projectile.x, projectile.z, projectile.splashRadius, projectile.damage, projectile.knockback || 0);
+          hitRadius(state, owner, projectile.x, projectile.z, projectile.splashRadius, projectile.damage, projectile.knockback || 0, { directionX: projectile.dirX, directionZ: projectile.dirZ, projectile: true });
           state.events.push({ type: 'EXPLOSION', ownerId: projectile.ownerId, x: projectile.x, z: projectile.z, radius: projectile.splashRadius, color: projectile.color, super: projectile.isSuper });
         }
       }
@@ -609,6 +915,12 @@ export function stepProjectiles(state, dt) {
       if (owner && Math.hypot(projectile.x - owner.x, projectile.z - owner.z) <= projectile.radius + 0.35) removed = true;
       if (projectile.travelled >= projectile.range) removed = true;
     } else if (projectile.travelled >= projectile.range) {
+      if (projectile.stickyFuse > 0 && projectile.stickyAttachToCover) {
+        projectile.stickyTargetId = 'cover';
+        projectile.stickyFuseRemaining = projectile.stickyFuse;
+        state.events.push({ type: 'SKILL_STICKY_ATTACH', projectileId: id, ownerId: projectile.ownerId, x: projectile.x, z: projectile.z, fuse: projectile.stickyFuse, color: projectile.color });
+        continue;
+      }
       if (projectile.returning) {
         const owner = state.players.get(projectile.ownerId);
         if (owner) {
@@ -622,7 +934,7 @@ export function stepProjectiles(state, dt) {
           const owner = state.players.get(projectile.ownerId);
           if (projectile.burnDamage > 0) detonateSukunaFlame(state, projectile, owner, projectile.x, projectile.z);
           else {
-            hitRadius(state, owner, projectile.x, projectile.z, projectile.splashRadius, projectile.damage, projectile.knockback || 0);
+            hitRadius(state, owner, projectile.x, projectile.z, projectile.splashRadius, projectile.damage, projectile.knockback || 0, { directionX: projectile.dirX, directionZ: projectile.dirZ, projectile: true });
             state.events.push({ type: 'EXPLOSION', ownerId: projectile.ownerId, x: projectile.x, z: projectile.z, radius: projectile.splashRadius, color: projectile.color, super: projectile.isSuper });
           }
         }
@@ -645,16 +957,25 @@ export function stepProjectiles(state, dt) {
           break;
         }
       }
+      if (projectile.stickyFuse > 0 && projectile.stickyAttachToTarget) {
+        projectile.stickyTargetId = target.id;
+        projectile.stickyOffsetX = projectile.x - target.x;
+        projectile.stickyOffsetZ = projectile.z - target.z;
+        projectile.stickyFuseRemaining = projectile.stickyFuse;
+        state.events.push({ type: 'SKILL_STICKY_ATTACH', projectileId: id, ownerId: projectile.ownerId, targetId: target.id, x: projectile.x, z: projectile.z, fuse: projectile.stickyFuse, color: projectile.color });
+        break;
+      }
+      let dealt = 0;
       if (projectile.splashRadius > 0) {
         const owner = state.players.get(projectile.ownerId);
         if (projectile.burnDamage > 0) detonateSukunaFlame(state, projectile, owner, projectile.x, projectile.z);
         else {
-          hitRadius(state, owner, projectile.x, projectile.z, projectile.splashRadius, projectile.damage, projectile.knockback || 0);
+          hitRadius(state, owner, projectile.x, projectile.z, projectile.splashRadius, projectile.damage, projectile.knockback || 0, { directionX: projectile.dirX, directionZ: projectile.dirZ, projectile: true });
           state.events.push({ type: 'EXPLOSION', ownerId: projectile.ownerId, x: projectile.x, z: projectile.z, radius: projectile.splashRadius, color: projectile.color, super: projectile.isSuper });
         }
         if (projectile.burnDamage > 0) removed = true;
       } else {
-        const dealt = applyDamage(state, target, projectile.damage, state.players.get(projectile.ownerId));
+        dealt = applyDamage(state, target, projectile.damage, state.players.get(projectile.ownerId), { directionX: projectile.dirX, directionZ: projectile.dirZ, projectile: true });
         if (dealt > 0 && !projectile.noKnockback && !isKnockbackImmune(target)) {
           const strength = projectile.knockback || 0;
           target.x += projectile.dirX * strength;
@@ -664,6 +985,15 @@ export function stepProjectiles(state, dt) {
         }
       }
       const owner = state.players.get(projectile.ownerId);
+      if (projectile.kunaiSkill && dealt > 0 && owner) {
+        owner.kunaiRecastTargetId = target.id;
+        owner.kunaiRecastUntil = state.match.elapsed + (getCharacterDef('naka').skills[1].recastWindow || 2);
+        state.events.push({ type: 'KUNAI_RECAST_READY', ownerId: owner.id, targetId: target.id, remaining: getCharacterDef('naka').skills[1].recastWindow || 2 });
+      }
+      if (projectile.defenseBreak > 0 && dealt > 0) {
+        target.defenseBreakT = Math.max(target.defenseBreakT || 0, projectile.defenseBreakDuration);
+        state.events.push({ type: 'DEFENSE_BROKEN', targetId: target.id, sourceId: projectile.ownerId, remaining: target.defenseBreakT });
+      }
       if (owner?.characterId === 'naka' && projectile.returning && projectile.onReturn) owner.speedBoostT = 1.5;
       if (!projectile.returning && !projectile.pierce && (projectile.splashRadius === 0 || projectile.burnDamage > 0)) removed = true;
     }
@@ -672,6 +1002,7 @@ export function stepProjectiles(state, dt) {
 }
 
 export function stepAreaEffects(state, dt) {
+  for (const player of state.players.values()) player.smokeConcealed = false;
   for (const [id, area] of state.areaEffects) {
     if (area.kind === 'gojo-pull') {
       area.remaining -= dt;
@@ -697,6 +1028,22 @@ export function stepAreaEffects(state, dt) {
       if (area.remaining <= 0) {
         for (const target of state.players.values()) target.slowEffects?.delete(`gojo:${area.ownerId}`);
         state.areaEffects.delete(id); state.events.push({ type: 'AREA_END', id });
+      }
+      continue;
+    }
+
+    if (area.kind === 'smoke-screen') {
+      area.remaining -= dt;
+      const owner = state.players.get(area.ownerId);
+      if (owner?.alive && Math.hypot(owner.x - area.x, owner.z - area.z) <= area.radius && owner.smokeRevealT <= 0) owner.smokeConcealed = true;
+      for (const target of state.players.values()) {
+        if (target.id === area.ownerId || !target.alive || target.airborneT > 0 || Math.hypot(target.x - area.x, target.z - area.z) > area.radius + 0.45) continue;
+        applySlowEffect(target, `smoke:${id}`, area.slow, 0.35);
+      }
+      if (area.remaining <= 0) {
+        for (const target of state.players.values()) target.slowEffects?.delete(`smoke:${id}`);
+        state.areaEffects.delete(id);
+        state.events.push({ type: 'AREA_END', id });
       }
       continue;
     }
@@ -756,6 +1103,26 @@ export function stepCharacterEffects(state, dt) {
       state.events.push({ type: 'BARRIER_READY', ownerId: player.id });
     }
     player.sukunaRushT = Math.max(0, (player.sukunaRushT || 0) - dt);
+    player.overchargeT = Math.max(0, (player.overchargeT || 0) - dt);
+    player.damageReductionT = Math.max(0, (player.damageReductionT || 0) - dt);
+    player.ccImmuneT = Math.max(0, (player.ccImmuneT || 0) - dt);
+    player.defenseBreakT = Math.max(0, (player.defenseBreakT || 0) - dt);
+    player.stealthT = Math.max(0, (player.stealthT || 0) - dt);
+    player.smokeRevealT = Math.max(0, (player.smokeRevealT || 0) - dt);
+    const eagleEyeWasActive = player.eagleEyeT > 0;
+    player.eagleEyeT = Math.max(0, (player.eagleEyeT || 0) - dt);
+    if (eagleEyeWasActive && player.eagleEyeT === 0) player.pierceCoverShots = 0;
+    player.skillParryT = Math.max(0, (player.skillParryT || 0) - dt);
+    player.parryEmpowerT = Math.max(0, (player.parryEmpowerT || 0) - dt);
+    player.tauntEchoT = Math.max(0, (player.tauntEchoT || 0) - dt);
+    if (player.tauntEchoT > 0) {
+      for (const target of state.players.values()) {
+        if (target.id === player.id || !target.alive || target.airborneT > 0 || Math.hypot(target.x - player.x, target.z - player.z) > player.tauntEchoRadius + 0.45) continue;
+        const away = normalize2(target.x - player.x, target.z - player.z);
+        const move = normalize2(target.input?.moveX || 0, target.input?.moveZ || 0);
+        if (away.x * move.x + away.z * move.z > 0.35) applySlowEffect(target, `taunt:${player.id}`, player.tauntEchoSlow, 0.28);
+      }
+    }
     for (const [sourceId, slow] of player.slowEffects || []) {
       slow.remaining = Math.max(0, slow.remaining - dt);
       if (slow.remaining <= 0) player.slowEffects.delete(sourceId);
@@ -766,7 +1133,7 @@ export function stepCharacterEffects(state, dt) {
       while (effect.nextT <= 0 && effect.ticksRemaining > 0 && player.alive) {
         effect.nextT += 1;
         effect.ticksRemaining -= 1;
-        applyDamage(state, player, effect.damage, state.players.get(sourceId));
+        applyDamage(state, player, effect.damage, state.players.get(effect.ownerId ?? sourceId), { dot: true });
       }
       if (effect.remaining <= 0 || effect.ticksRemaining <= 0) player.bleeds.delete(sourceId);
     }
@@ -775,7 +1142,7 @@ export function stepCharacterEffects(state, dt) {
       while (effect.nextT <= 0 && effect.ticksRemaining > 0 && player.alive) {
         effect.nextT += 1;
         effect.ticksRemaining -= 1;
-        applyDamage(state, player, effect.damage, state.players.get(sourceId));
+        applyDamage(state, player, effect.damage, state.players.get(effect.ownerId ?? sourceId), { dot: true });
       }
       if (effect.remaining <= 0 || effect.ticksRemaining <= 0) player.burns.delete(sourceId);
     }
@@ -841,11 +1208,11 @@ function hitSegment(state, attacker, ax, az, bx, bz, damage, radius = 0.65) {
   }
 }
 
-function hitRadius(state, attacker, x, z, radius, damage, knockback = 0) {
+function hitRadius(state, attacker, x, z, radius, damage, knockback = 0, options = {}) {
   if (!attacker) return;
   for (const target of state.players.values()) {
     if (target.id === attacker.id || !target.alive || target.airborneT > 0 || Math.hypot(target.x - x, target.z - z) > radius) continue;
-    const dealt = applyDamage(state, target, damage, attacker);
+    const dealt = applyDamage(state, target, damage, attacker, options);
     if (dealt > 0 && knockback > 0 && !isKnockbackImmune(target)) {
       const direction = normalize2(target.x - x, target.z - z);
       target.x += direction.x * knockback; target.z += direction.z * knockback;
@@ -853,12 +1220,19 @@ function hitRadius(state, attacker, x, z, radius, damage, knockback = 0) {
   }
 }
 
-export function applyDamage(state, target, amount, attacker) {
+export function applyDamage(state, target, amount, attacker, options = {}) {
   if (target) target.lastDamageBlocked = false;
   if (!target?.alive || target.spawnProtectionT > 0 || target.flickerInvulnT > 0 || target.airborneT > 0) return 0;
   if (consumeGojoBarrier(state, target, attacker)) return 0;
-  target.gojoBarrierReadyAt = state.match.elapsed + 10;
-  const multiplier = target.shieldT > 0 ? 0.35 : 1;
+  if (consumeSkillParry(state, target, attacker, options)) { target.lastDamageBlocked = true; return 0; }
+  if (!options.dot && target.stealthT > 0) {
+    target.stealthT = 0;
+    state.events.push({ type: 'STEALTH_END', ownerId: target.id });
+  }
+  if (target.characterId === 'gojo') target.gojoBarrierReadyAt = state.match.elapsed + 5;
+  let multiplier = target.shieldT > 0 ? 0.35 : 1;
+  if (target.damageReductionT > 0) multiplier *= 1 - Math.max(0, Math.min(0.9, target.damageReduction || 0));
+  if (target.defenseBreakT > 0) multiplier *= 1.12;
   const dealt = Math.min(target.hp, Math.max(0, Math.round(amount * multiplier)));
   target.hp -= dealt;
   target.lastCombat = state.match.elapsed;
@@ -890,7 +1264,7 @@ export function applyDamage(state, target, amount, attacker) {
 function consumeGojoBarrier(state, target, attacker) {
   if (!attacker || attacker.id === target.id || target.characterId !== 'gojo' || !target.gojoBarrier) return false;
   target.gojoBarrier = false;
-  target.gojoBarrierReadyAt = state.match.elapsed + 10;
+  target.gojoBarrierReadyAt = state.match.elapsed + 5;
   target.lastDamageBlocked = true;
   state.events.push({ type: 'BARRIER_BLOCKED', targetId: target.id, attackerId: attacker.id });
   return true;
@@ -914,6 +1288,13 @@ export function stepLeaps(state, dt) {
     hitRadius(state, player, leap.x, leap.z, leap.radius, leap.damage, leap.knockback);
     state.events.push({ type: 'EXPLOSION', ownerId: player.id, x: leap.x, z: leap.z, radius: leap.radius, color: leap.color, super: true });
   }
+}
+
+function detonateSticky(state, projectile, owner) {
+  if (!owner) return;
+  hitRadius(state, owner, projectile.x, projectile.z, projectile.splashRadius, projectile.damage, projectile.knockback || 0, { directionX: projectile.dirX, directionZ: projectile.dirZ, projectile: true });
+  destroyCoverInRadius(state, projectile.x, projectile.z, projectile.splashRadius);
+  state.events.push({ type: 'EXPLOSION', ownerId: owner.id, x: projectile.x, z: projectile.z, radius: projectile.splashRadius, color: projectile.color, skillId: 'sticky-grenade' });
 }
 
 function isKnockbackImmune(player) {

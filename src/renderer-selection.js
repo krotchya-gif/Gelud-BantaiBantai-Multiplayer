@@ -1,5 +1,4 @@
-export function chooseRenderer({ requested, isMobile, webgpuAvailable }) {
-  if (!webgpuAvailable || requested === 'webgl') return 'webgl';
-  if (requested === 'webgpu') return 'webgpu';
-  return isMobile ? 'webgpu' : 'webgl';
+export function chooseRenderer({ requested, webgpuAvailable }) {
+  if (requested === 'webgl') return 'webgl';
+  return webgpuAvailable ? 'webgpu' : 'webgl';
 }

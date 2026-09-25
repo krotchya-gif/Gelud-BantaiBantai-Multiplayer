@@ -86,7 +86,7 @@ Implementasi yang sudah tersedia:
 - Maksimal 8 pemain per room. Join-in-progress tidak didukung setelah match berjalan.
 - Classic, Blitz, dan Deathmatch; Deathmatch memakai target 50 kill, batas waktu 5 menit, respawn 5 detik, dan spawn protection 2 detik.
 - Shared simulation untuk movement, collision, surface modifier, hazard, projectile, melee, damage, knockback, ammo/reload, Super, item, death, respawn, scoreboard, dan match result.
-- Gojo dan Sukuna tersedia di solo serta lobby multiplayer. Data stat/skill canonical ada di `shared/data/characters.js`, disamakan dengan roster engine solo, dan skill mereka dieksekusi server secara authoritative. Charge Sukuna memakai fase start/release/cancel; Barrier Gojo memblokir satu hit pemain beserta hard CC, termasuk CC murni dari Domain.
+- Semua 10 karakter memiliki dua skill aktif di solo dan multiplayer. Data canonical ada di `shared/data/characters.js`, disamakan dengan roster engine solo, dan hasil multiplayer dieksekusi server secara authoritative. Charge Sukuna memakai fase start/release/cancel; Barrier Gojo siap kembali setelah 5 detik tanpa menerima hit dan memblokir satu damage/CC instance.
 - State airborne Titan juga authoritative: gerak dan serangan yang diterima ditahan selama leap, damage/CC mengabaikan Titan di udara, Super meledak saat mendarat, dan sisa durasinya menggerakkan animasi jaringan.
 - Input gerak yang datang bersamaan dari WebSocket diantrikan dan dikonsumsi satu per tick authoritative. Nilai `ack` adalah sequence terakhir yang benar-benar diproses, sehingga replay prediction client tetap sejajar ketika paket datang bergerombol.
 - Semua karakter, nama display, damage, ammo, cooldown, Super, item, HUD, dan event combat disamakan antara solo dan multiplayer. `Flicker` juga authoritative di server dan tersedia untuk bot.
@@ -97,8 +97,9 @@ Implementasi yang sudah tersedia:
 - Input touch multiplayer memakai fallback auto-aim yang sama dengan solo saat pemain melakukan tap tanpa perpindahan joystick. Client dan server juga mengganti vektor aim kosong dengan arah aim/facing terakhir, sehingga projectile, melee, shuriken, dan arrow tidak berhenti atau selalu mengarah ke default.
 - HUD touch saat match tidak lagi menampilkan petunjuk “Drag to Aim”. Pickup dan pemakaian item juga tidak memunculkan toast bawah; slot item, efek, dan suara tetap memberi feedback tanpa menutup kontrol utility.
 - Snapshot penuh tetap 15 Hz walaupun event combat ramai. Event projectile, damage, dan efek dikirim melalui frame gameplay terpisah agar traffic tidak melonjak menjadi satu snapshot setiap tick.
-- Perangkat coarse/low-end (misalnya perangkat dengan memory sekitar 4 GB) otomatis memakai batas pixel lebih rendah, tanpa AO/bloom dan tanpa projectile trail jaringan untuk mengurangi stutter.
-- PWA single-player, WebGL2 sebagai renderer default, WebGPU eksperimental opt-in, desktop controls, mobile multi-touch, dan mode left-handed tetap dipertahankan.
+- WebGPU menjadi renderer utama di desktop dan mobile. WebGL2 tetap tersedia sebagai fallback hanya jika WebGPU tidak tersedia atau gagal diinisialisasi. Resolusi render dibatasi; saat match FPS menetap di bawah 60, game menurunkan skala resolusi bertahap sampai 60%, lalu menaikkannya bertahap setelah FPS di atas 68.
+- Pada WebGPU, shadow dinamis dimatikan dan point-light pool dipatok empat sepanjang semua preset kualitas untuk menjaga struktur pipeline tetap stabil. AO/Bloom/post-processing belum tersedia di renderer WebGPU; kontrol tersebut nonaktif.
+- PWA single-player, desktop controls, mobile multi-touch, dan mode left-handed tetap dipertahankan.
 
 Fitur yang memang belum termasuk scope saat ini adalah akun/database, progression dan leaderboard global, ranked matchmaking, friend/party system, chat/voice, spectator/replay, Redis atau multi-server orchestration, delta/binary snapshot protocol, Kubernetes/microservices, dan anti-cheat native. Room dan state match masih berada di memory satu process Node.js.
 
@@ -119,9 +120,9 @@ npm test -- --run tests/server tests/shared
 npm test -- --run
 ```
 
-Verifikasi terbaru, 25 September 2026: `npm run build`, `npm run test:characters`, `npm test -- --run` (23 file, 99 test), dan `git diff --check` lulus. Verifier karakter mencakup 10 rig gameplay dan dua design rig, paritas nama/stat/skill/Super Gojo-Sukuna, roster Deathmatch seeded, item/Flicker/trap solo, efek Blue solo dan multiplayer, serta visual tangan Gojo/Sukuna. Build berisi 27 file dengan total 2.770.692 byte; bundle WebGPU 781,37 kB (212,55 kB gzip) dan aplikasi 33,97 kB (11,92 kB gzip). Vite masih memberi peringatan chunk WebGPU di atas 500 kB. Smoke test browser pada build bersih memastikan Gojo dan Sukuna muncul di roster, tombol skill Gojo tampil di desktop, dan Blue masuk cooldown setelah dipakai. Uji multiplayer dua perangkat, touch langsung, soak test, dan balance playtest belum divalidasi pada run ini.
+Verifikasi terbaru, 25 September 2026: `npm run build`, `npm run test:characters`, `npm test -- --run` (25 file, 132 test), dan `git diff --check` lulus. Verifier mencakup 10 rig gameplay + 2 design rig, 20 jalur skill aktif solo, simulasi/domain/barrier/parry, item/Flicker/trap, visual multiplayer, dan kualitas renderer. Build berisi 27 file dengan total 2.835.989 byte; bundle WebGPU 781,37 kB (212,55 kB gzip), main app 39,52 kB (13,90 kB gzip), dan Character Studio 7,47 kB (3,29 kB gzip). Vite tetap memberi peringatan chunk WebGPU di atas 500 kB. Smoke test browser lokal melaporkan WebGPU aktif; Low → Medium → High saat match solo tetap responsif pada 60 FPS di browser tersebut. Ini bukan pengukuran Poco F6. Belum ada uji multiplayer dua perangkat, sentuhan pada ponsel fisik, soak test, atau balance playtest pada run ini.
 
-Pembaruan gameplay Gojo/Sukuna, 25 September 2026: timer Blue solo kini benar-benar mengakhiri tarikan setelah 1,4 detik dan menghapus efek slow/orb; renderer multiplayer juga menampilkan serta mem-fade orb dari timer authoritative. Nama basic, pasif, dua skill, dan Super dikembalikan ke nama resmi yang diminta. Skill 1/2 terlihat di desktop dan touch dengan state cooldown/charge, warna masing-masing karakter, serta drag-to-aim pada touch. Gojo membawa Blue/Red yang bercahaya; Sukuna membawa api di kedua tangan. Petunjuk “Drag to Aim” dan toast bawah pickup/pemakaian item tidak tampil saat match agar kontrol utility tidak tertutup.
+Pembaruan skill roster, 25 September 2026: seluruh sepuluh karakter memiliki dua skill aktif dengan state dan timer authoritative yang dicerminkan pada solo serta multiplayer. Blue Gojo menarik selama 2,4 detik dan orb/marker memudar pada batas timer yang sama. Infinity Barrier kembali setelah 5 detik dan hanya menahan satu hit instance. Kedua Domain aktif selama 4 detik. Sukuna kini berperan sebagai mage api dengan Dismantle range 10 dan Fuga range 9/13,5. Skill baru mencakup dash/defense, parry, trap, stealth, tembakan penembus cover, chain lightning, smoke concealment, dan recast Kunai. Super Gojo mendapat pose cast dan burst partikel; Malevolent Shrine memasang visual kuil procedural di kedua mode. Kuil disusun dari empat mesh statis gabungan dan tidak memakai dynamic shadow; efek cast Gojo menggunakan effect system yang sudah ada. Perubahan renderer terbaru menstabilkan jumlah dynamic light/shadow WebGPU dan menambahkan adaptive render scale; belum diuji pada Poco F6 secara fisik. Skill 1/2 tersedia di desktop dan touch dengan cooldown/charge serta arah drag touch.
 
 Benchmark sintetis delapan pemain yang tercatat sebelumnya adalah baseline sebelum snapshot trap berkala: snapshot 15 Hz, trafik sekitar 62,5 KB/detik/client saat diam dan 169,2 KB/detik/client saat semua pemain menembak, dengan p95 simulasi plus satu serialisasi snapshot sekitar 0,29 ms. Trafik multiplayer setelah penambahan snapshot trap belum diukur ulang.
 
@@ -129,13 +130,15 @@ Pekerjaan operasional yang masih memerlukan lingkungan deployment adalah mengisi
 
 ## Renderer
 
-`src/bootstrap.js` memuat engine gameplay klasik secara berurutan. Perangkat mobile memilih WebGPU otomatis bila tersedia agar memakai jalur render langsung; perangkat lain memakai WebGL2 secara default. WebGL2 tetap dapat dipaksa dengan `?renderer=webgl`, dan WebGPU dapat dipaksa dengan `?renderer=webgpu`. Pada sesi verifikasi lokal sebelumnya, jalur WebGPU desktop berulang kali melaporkan `ShadowDepthTexture` yang sudah dihancurkan saat frame dikirim, sehingga desktop tetap memakai WebGL2 sampai masalah lifecycle shadow tersebut selesai diperiksa.
+`src/bootstrap.js` selalu memilih WebGPU secara default pada desktop dan mobile, lalu memuat engine gameplay klasik berurutan. Jika API/adapter WebGPU tidak tersedia atau inisialisasinya gagal, bootstrap memuat engine dengan WebGL2 sebagai fallback. Fallback mengganti elemen canvas setelah percobaan WebGPU gagal agar konteks yang gagal tidak dipakai ulang. Parameter debug `?renderer=webgl` tetap dapat memaksa WebGL2 secara eksplisit; tanpa parameter itu, WebGPU diprioritaskan dan WebGL2 hanya menjadi fallback otomatis.
 
 ```text
-http://localhost:5173/?renderer=webgpu
+http://localhost:5173/
 ```
 
-Jalur WebGPU dan WebGL2 memakai pipeline kualitas yang sama secara umum, tetapi beberapa efek post-processing dan shader lama memiliki padanan lebih sederhana di WebGPU. Pada High/Ultra, ukuran shadow map dibatasi; GTAO WebGL2 dijalankan pada separuh resolusi buffer untuk mengurangi biaya render. Pergantian High/Ultra mempertahankan pass post-processing yang masih cocok dan memperbarui resolusi/shadow tanpa membangun ulang pipeline. Jika FPS tetap sangat rendah selama beberapa detik, game menurunkan kualitas satu tingkat dan memberi tahu pemain, termasuk saat kualitas semula dipilih manual. Freeze yang hanya muncul sesekali pada GPU atau map tertentu tetap perlu diuji di perangkat yang mengalaminya.
+Preset kualitas WebGPU tidak menambah/menghapus lampu atau mengubah shadow caster, karena perubahan tersebut memicu kompilasi pipeline saat match dan sebelumnya dapat membekukan pergantian kualitas. WebGPU memakai empat point light pool tetap dan tidak merender dynamic shadow. Pergantian preset mengubah skala gambar dan tingkat efek yang didukung; adaptive resolution turun satu langkah setiap jendela pengukuran bila FPS di bawah 60, dan pulih bertahap di atas 68. Low tetap merupakan tier minimum; skala gambar dapat turun sampai 60%.
+
+Pengguna melaporkan Poco F6 sebelumnya mencapai 100–120 FPS, lalu turun di bawah 60 FPS pada Low dan freeze saat berpindah ke Medium/High. Laporan tersebut menjadi baseline masalah; perubahan terbaru belum diukur ulang pada perangkat fisik tersebut.
 
 ## Struktur proyek
 
@@ -195,9 +198,10 @@ File engine dimuat sebagai script klasik berurutan karena beberapa kelas Three.j
 - **Nopal:** Basic menembakkan 3 projectile listrik dengan damage 380 per projectile.
 - **Naka:** Triple Shuriken menimbulkan 280 damage per shuriken.
 - **Einar:** HP dan damage tetap; speed menjadi 3,25 dan reload menjadi 1 detik.
-- **Gojo:** **Infinity Barrier**; Basic Attack **Limitless Strike (Melee Combo)**; Skill 1 **Cursed Technique Lapse - Blue** (orb menarik selama 1,4 detik); Skill 2 **Cursed Technique Reversal - Red**; Super **Domain Expansion - Infinite Void**. Barrier yang siap juga menyerap satu efek hard CC tanpa damage.
-- **Sukuna:** **Reverse Cursed Technique**; Basic Attack **Cleave (Melee Cone)**; Skill 1 **Dismantle** (maksimal tiga target); Skill 2 **Fuga - Kamino / Flame Arrow** (tap atau charge); Super **Domain Expansion - Malevolent Shrine**.
-- Gojo/Sukuna memiliki tombol skill yang menampilkan nama pendek, warna karakter, cooldown/charge, serta state `READY`/`WAIT` di desktop dan touch. Tombol touch mendukung drag-to-aim; Fuga memperlihatkan jangkauan tap atau ledak charge. Gojo membawa orb Blue dan Red pada tangan; Sukuna membawa api Fuga pada kedua tangan. Rig dipakai di solo dan multiplayer.
+- **Gojo:** **Infinity Barrier** mengisi ulang 5 detik setelah memblokir satu damage/CC instance; Skill 1 **Cursed Technique Lapse - Blue** menarik selama 2,4 detik; Skill 2 **Cursed Technique Reversal - Red**; Super **Domain Expansion - Infinite Void**, domain aktif 4 detik dan freeze tetap 1,5 detik. Super memutar pose cast dengan burst partikel.
+- **Sukuna:** **Reverse Cursed Technique**; Skill 1 **Dismantle** menembus maksimal tiga target sampai range 10; Skill 2 **Fuga - Kamino / Flame Arrow** (tap range 9 atau charge range 13,5); Super **Domain Expansion - Malevolent Shrine** dengan delapan tick dan visual kuil.
+- Delapan roster lainnya: Athallah (**Combat Slide**, **Concussive Shell**); Zeyd (**Piercing Bolt**, **Tactical Roll**); Azka (**Sticky Grenade**, **Smoke Screen**); Einar (**Iron Charge**, **Taunt Echo**); Nopal (**Chain Lightning**, **Overcharge Volt**); Naka (**Smoke Bomb**, **Kunai Dash** recast); Ello (**Parry Stance**, **Swift Flash**); Syafiah (**Eagle Eye**, **Caltrops Trap**). Perilaku dan angka tiap skill dicatat di [Roster dan Skill v2](docs/roster-skill-design-v2.md).
+- Semua tombol skill menampilkan nama pendek, cooldown/charge, serta state `READY`/`WAIT` di desktop dan touch. Skill aim dapat diarahkan dengan drag touch; Fuga memperlihatkan jangkauan tap atau ledak charge. Efek gameplay diputuskan shared/server dan divisualisasikan oleh rig serta renderer solo/multiplayer yang sama.
 
 Athallah tetap menjadi baseline pass ini. Item `ammo` berubah menjadi **Focus** yang mengisi 20% Super untuk Ello dan Syafiah; karakter lain tetap menerima ammo refill.
 
@@ -252,8 +256,6 @@ Mobile memakai joystick gerak kiri dan joystick aim kanan; drag lalu lepas untuk
 Parameter yang dibaca engine:
 
 ```text
-?renderer=webgl
-?renderer=webgpu
 ?q=low|medium|high|ultra
 ?bots=auto|easy|normal|hard|brutal
 ?mode=classic|blitz|deathmatch
@@ -266,12 +268,12 @@ Parameter yang dibaca engine:
 ?ss=0..3
 ```
 
-Perangkat tanpa WebGPU selalu kembali ke WebGL2. Memilih kualitas di mobile tidak lagi menyalakan AO dan Bloom secara otomatis; keduanya tetap tersedia lewat pengaturan.
+WebGPU adalah renderer utama. Perangkat/browser yang tidak menyediakan WebGPU, atau gagal menginisialisasikannya, menjalankan game melalui fallback WebGL2. AO/Bloom tersedia hanya pada jalur WebGL2; kontrolnya dinonaktifkan ketika WebGPU aktif.
 
 Contoh:
 
 ```text
-http://localhost:5173/?renderer=webgl&mode=deathmatch&map=open&auto=ello&seed=42
+http://localhost:5173/?mode=deathmatch&map=open&auto=ello&seed=42
 ```
 
 ## Verifikasi build
@@ -282,7 +284,7 @@ npm run test:characters
 npm run build
 ```
 
-Build menulis output ke `dist/`. Ukuran bundle vendor WebGPU Three.js dapat memunculkan peringatan ukuran chunk dari Vite; ini tidak menghentikan build. Sebelum Character Studio ditambahkan pada 24 September 2026, 23 file test dan 92 test lulus, pemeriksaan rig karakter lulus, dan build menghasilkan 22 file berukuran total 3.015.523 byte. Browser desktop berjalan 60 FPS tanpa error console. Layout mobile diperiksa pada viewport 1280 × 540: Attack 112 px dan Super/Skill 1/Skill 2 masing-masing 68 px, mengikuti posisi arc referensi. Pengguna melaporkan Redmi 12C kini berjalan di atas 40 FPS; pengukuran ulang Poco F6 dan uji sentuh langsung untuk tombol baru masih menunggu.
+Build menulis output ke `dist/`. Ukuran bundle vendor WebGPU Three.js dapat memunculkan peringatan ukuran chunk dari Vite; ini tidak menghentikan build. Sebelum Character Studio ditambahkan pada 24 September 2026, 23 file test dan 92 test lulus, pemeriksaan rig karakter lulus, dan build menghasilkan 22 file berukuran total 3.015.523 byte. Browser desktop berjalan 60 FPS tanpa error console. Layout mobile diperiksa pada viewport 1280 × 540: Attack 112 px dan Super/Skill 1/Skill 2 masing-masing 68 px, mengikuti posisi arc referensi. Pengguna sebelumnya melaporkan Redmi 12C berjalan di atas 40 FPS; laporan itu merupakan observasi sebelum update roster ini dan bukan pengukuran baru. Perubahan ini belum diukur pada Redmi 12C atau Poco F6 secara fisik.
 
 Pembaruan desain Gojo dan Sukuna, 24 September 2026: preview Character Studio diperiksa pada tampak depan, samping, belakang, serta animasi Cast. `npm.cmd run build` lulus dan menghasilkan 27 file dengan total 3.048.666 byte; chunk WebGPU Three.js berukuran 781,37 kB (212,55 kB gzip) dan tetap memunculkan peringatan batas 500 kB dari Vite. `git diff --check` lulus. Suite test dan pemeriksaan rig tidak dijalankan ulang setelah perubahan visual ini.
 

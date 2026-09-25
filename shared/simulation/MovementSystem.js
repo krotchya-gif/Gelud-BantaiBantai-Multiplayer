@@ -40,6 +40,27 @@ export function stepMovement(state, dt, collision) {
       decrementMovementTimers(player, dt);
       continue;
     }
+    if (player.skillDashState) {
+      const dash = player.skillDashState;
+      dash.previousX = player.x;
+      dash.previousZ = player.z;
+      dash.elapsed = Math.min(dash.duration, (dash.elapsed || 0) + dt);
+      const progress = dash.duration > 0 ? dash.elapsed / dash.duration : 1;
+      const eased = progress * progress * (3 - 2 * progress);
+      const next = collision.resolveCircle(
+        dash.fromX + (dash.toX - dash.fromX) * eased,
+        dash.fromZ + (dash.toZ - dash.fromZ) * eased,
+        0.45,
+      );
+      player.x = next.x;
+      player.z = next.z;
+      player.velX = dash.dirX * dash.distance / Math.max(0.01, dash.duration);
+      player.velZ = dash.dirZ * dash.distance / Math.max(0.01, dash.duration);
+      dash.finished = progress >= 1;
+      player.lastProcessedInputSeq = player.input.seq;
+      decrementMovementTimers(player, dt);
+      continue;
+    }
     const input = player.input;
     const direction = normalize2(input.moveX, input.moveZ);
     const character = getCharacterDef(player.characterId);
@@ -50,7 +71,7 @@ export function stepMovement(state, dt, collision) {
     else player.stationaryT = 0;
     if (character.terrainAffinity?.type === 'bush' && surface === 'bush') speed *= character.terrainAffinity.moveMultiplier;
     if (surface === 'mud') speed *= gameplay.mudMoveMultiplier ?? 1;
-    const bonus = Math.min(1.4, (player.itemSpeedT > 0 ? 1.35 : 1) * (player.speedBoostT > 0 ? 1.15 : 1) * (player.sukunaRushT > 0 ? 1.1 : 1));
+    const bonus = Math.min(1.4, (player.itemSpeedT > 0 ? 1.35 : 1) * (player.speedBoostT > 0 ? 1.15 : 1) * (player.sukunaRushT > 0 ? 1.1 : 1) * (player.overchargeT > 0 ? 1.15 : 1));
     speed *= bonus;
     const statusSlow = Math.min(1, ...(player.slowEffects ? [...player.slowEffects.values()].map((effect) => effect.multiplier) : [1]));
     if (player.slowT > 0) speed *= Math.min(0.85, statusSlow);

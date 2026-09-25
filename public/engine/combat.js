@@ -1,3 +1,23 @@
+function segmentHitsBrawlerCircle(ax, az, bx, bz, cx, cz, radius) {
+  const dx = bx - ax; const dz = bz - az; const lengthSquared = dx * dx + dz * dz;
+  const t = lengthSquared > 1e-8 ? $c(((cx - ax) * dx + (cz - az) * dz) / lengthSquared, 0, 1) : 0;
+  return Math.hypot(ax + dx * t - cx, az + dz * t - cz) <= radius;
+}
+
+function mergeStaticBoxes(key, parts) {
+  return $l(`static-${key}`, () => {
+    const geometries = parts.map(([x, y, z, sx, sy, sz]) => {
+      const geometry = ru(1, 1, 1).clone();
+      geometry.scale(sx, sy, sz).translate(x, y, z);
+      return geometry;
+    });
+    const merged = Nl(geometries);
+    geometries.forEach(geometry => geometry.dispose());
+    merged.computeBoundingSphere();
+    return merged;
+  });
+}
+
 function xu() {
   let e = (e) => {
     let t = al(128, 128),
@@ -37,6 +57,7 @@ var Su = class {
         (this.arrowShowers = []),
         (this.arrowFalls = []),
         (this.characterAreas = []));
+      this.characterTraps = [];
       let t = new xr(1, 10, 8);
       ((this.bulletMesh = new Yn(t, new Tn({ color: 16777215 }), bu)),
         (this.bulletMesh.count = 0),
@@ -60,6 +81,18 @@ var Su = class {
       this.arrowShowerDiscMaterial = new Tn({ color: 0xffd17a, transparent: !0, opacity: 0.18, depthWrite: !1 });
       this.arrowShowerRingMaterial = new Tn({ color: 0xffe5a5, transparent: !0, opacity: 0.92, depthWrite: !1 });
       this.arrowShowerColor = new J(0xffd17a);
+      this.shrineMaterials = {
+        wood: new Nr({ color: 0x4b2028, roughness: 0.78 }),
+        red: new Nr({ color: 0x9b2937, roughness: 0.62, metalness: 0.08 }),
+        roof: new Nr({ color: 0x201b29, roughness: 0.42, metalness: 0.26, emissive: 0x25070e, emissiveIntensity: 0.32 }),
+        gold: new Nr({ color: 0xc29346, roughness: 0.46, metalness: 0.48, emissive: 0x61300a, emissiveIntensity: 0.18 }),
+        trap: new Nr({ color: 0xb9a77c, roughness: 0.72 }),
+      };
+      this.trapSpikeGeometry = nu(0, 0.15, 0.42, 4);
+      this.trapDiscGeometry = new mr(0.7, 20).rotateX(-Math.PI / 2);
+      this.trapRingGeometry = new br(0.62, 0.7, 24).rotateX(-Math.PI / 2);
+      this.caltropDiscMaterial = new Tn({ color: 0x8c784d, transparent: !0, opacity: 0.28, depthWrite: !1 });
+      this.caltropRingMaterial = new Tn({ color: 0xd1bd87, transparent: !0, opacity: 0.92, depthWrite: !1 });
       this.characterProjectileGeometry = new xr(0.2, 12, 8);
       this.characterProjectileMaterial = new Nr({ color: 0xffffff, emissive: 0xff5b1b, emissiveIntensity: 2.2, roughness: 0.28, metalness: 0.12 });
       this.characterProjectileMesh = new Yn(this.characterProjectileGeometry, this.characterProjectileMaterial, bu);
@@ -248,6 +281,7 @@ var Su = class {
         radius: a.radius,
         damage: a.damage * e.damageMul,
         returnDamage: a.returnDamageMultiplier === undefined ? null : a.damage * e.damageMul * a.returnDamageMultiplier,
+        pierceCoverRemaining: a.pierceCover ? (a.pierceCoverCount ?? 1) : 0,
         color: c,
         alive: !0,
         trail: 0,
@@ -454,6 +488,195 @@ var Su = class {
       target.knock.set(0, 0);
       return collided;
     }
+    useRosterSkill(owner, skill, attack, dx, dz, targetX, targetZ) {
+      const id = attack.id;
+      if ([`combat-slide`, `tactical-roll`, `iron-charge`, `swift-flash`].includes(id)) {
+        if (!this.startRosterDash(owner, skill, attack, dx, dz, attack.distance, attack.duration)) return !1;
+        if (attack.damageReduction) { owner.damageReduction = attack.damageReduction; owner.damageReductionT = attack.duration; }
+        if (attack.ccImmune) owner.ccImmuneT = attack.duration;
+        return !0;
+      }
+      if (id === `concussive-shell`) {
+        const end = this.skillLineEnd(owner, dx, dz, attack.range);
+        for (const target of this.game.brawlers) {
+          if (!target.alive || target === owner || target.airborne) continue;
+          const x = target.x - owner.x; const z = target.z - owner.z; const distance = Math.hypot(x, z) || 1;
+          if (distance > attack.range + 0.45 || (x * end.dx + z * end.dz) / distance < Math.cos(attack.arc / 2) || !this.game.world.hasLineOfSight(owner.x, owner.z, target.x, target.z)) continue;
+          const dealt = target.takeDamage(Math.round(attack.damage * owner.damageMul), owner, !1, { kind: `skill`, dirX: end.dx, dirZ: end.dz });
+          if (dealt <= 0 || target.lastDamageBlocked || !target.alive) continue;
+          if (this.displaceBrawler(target, x, z, attack.knockback)) target.applyHardCC(attack.wallStun, `stun`, owner);
+        }
+        this.game.effects.muzzle(owner.x + end.dx * 0.4, 0.7, owner.z + end.dz * 0.4, end.dx, end.dz, new J(attack.color), 1.25);
+        this.game.audio.play(`shotBig`, owner.x, owner.z);
+        return !0;
+      }
+      if (id === `piercing-bolt` || id === `sticky-grenade` || id === `kunai-dash`) {
+        return !!this.spawnRosterProjectile(owner, dx, dz, attack, id);
+      }
+      if (id === `smoke-screen`) {
+        this.startCharacterArea(owner, `smoke-screen`, owner.x, owner.z, attack);
+        return !0;
+      }
+      if (id === `taunt-echo`) {
+        owner.tauntEchoT = attack.duration;
+        owner.tauntEchoRadius = attack.radius;
+        owner.tauntEchoSlow = attack.slowAway;
+        owner.damageReduction = attack.damageReduction;
+        owner.damageReductionT = attack.duration;
+        this.game.effects.ring(owner.x, owner.z, attack.radius, new J(attack.color), attack.duration, 0.3);
+        return !0;
+      }
+      if (id === `chain-lightning`) {
+        const candidates = this.game.brawlers.filter(target => target !== owner && target.alive && !target.airborne).filter(target => {
+          const x = target.x - owner.x; const z = target.z - owner.z; const distance = Math.hypot(x, z) || 1;
+          return distance <= attack.range + 0.45 && (x * dx + z * dz) / distance >= 0.78 && this.game.world.hasLineOfSight(owner.x, owner.z, target.x, target.z);
+        }).sort((a, b) => Math.hypot(a.x - owner.x, a.z - owner.z) - Math.hypot(b.x - owner.x, b.z - owner.z));
+        let current = candidates[0];
+        let from = owner;
+        const hit = new Set();
+        const color = new J(attack.color || 0xffdf55);
+        for (let jump = 0; current && jump <= attack.jumpCount; jump++) {
+          hit.add(current);
+          const damage = jump === 0 ? attack.damage : attack.jumpDamage;
+          const dealt = current.takeDamage(damage, owner, !1, { kind: `skill`, dirX: dx, dirZ: dz });
+          if (dealt > 0 && current.alive && !current.lastDamageBlocked) current.applyHardCC(attack.interruptDuration, `stun`, owner);
+          const fromX = from.x;
+          const fromZ = from.z;
+          const arcX = current.x - fromX;
+          const arcZ = current.z - fromZ;
+          const arcLength = Math.hypot(arcX, arcZ);
+          if (arcLength > 1e-8) this.game.effects.electricMuzzle(fromX, 0.8, fromZ, arcX / arcLength, arcZ / arcLength, color, 0.85);
+          this.game.effects.electricImpact(current.x, 0.8, current.z, color, !1);
+          from = current;
+          current = this.game.brawlers.filter(target => target !== owner && target.alive && !target.airborne && !hit.has(target) && Math.hypot(target.x - from.x, target.z - from.z) <= attack.jumpRange && this.game.world.hasLineOfSight(from.x, from.z, target.x, target.z)).sort((a, b) => Math.hypot(a.x - from.x, a.z - from.z) - Math.hypot(b.x - from.x, b.z - from.z))[0];
+        }
+        this.game.audio.play(`zapBig`, owner.x, owner.z);
+        return !0;
+      }
+      if (id === `overcharge-volt`) { owner.overchargeT = attack.duration; this.game.effects.electricMuzzle(owner.x, 0.82, owner.z, dx, dz, new J(attack.color), 1.2); return !0; }
+      if (id === `smoke-bomb`) { owner.stealthT = attack.duration; this.game.effects.burst(owner.x, 0.55, owner.z, new J(attack.color), 18, 2.2); this.game.audio.play(`zap`, owner.x, owner.z); return !0; }
+      if (id === `parry-stance`) {
+        owner.skillParryT = attack.duration; owner.skillParryFacing = owner.facing;
+        this.game.effects.ring(owner.x, owner.z, 1.1, new J(attack.color), 0.4, 1.3);
+        this.game.effects.impact(owner.x, 0.82, owner.z, new J(attack.color), 8);
+        return !0;
+      }
+      if (id === `eagle-eye`) {
+        owner.eagleEyeT = attack.duration; owner.pierceCoverShots = attack.pierceDestructibleCover;
+        this.game.effects.impact(owner.x, 0.9, owner.z, new J(attack.color), 12);
+        return !0;
+      }
+      if (id === `caltrops-trap`) {
+        const trapX = owner.x;
+        const trapZ = owner.z;
+        if (!this.startRosterDash(owner, skill, attack, -dx, -dz, attack.retreatDistance, 0.28)) return !1;
+        const marker = this.createCaltropsMarker(trapX, trapZ);
+        this.characterTraps.push({ owner, x: trapX, z: trapZ, remaining: attack.trapDuration, attack, marker });
+        return !0;
+      }
+      return !1;
+    }
+    rosterDashPlan(owner, dx, dz, distance) {
+      if (!Number.isFinite(dx) || !Number.isFinite(dz) || !Number.isFinite(distance) || distance <= 0) return null;
+      const length = Math.hypot(dx, dz);
+      if (length < 1e-8) return null;
+      dx /= length;
+      dz /= length;
+      let amount = distance;
+      const wall = this.game.world.raycast(owner.x, owner.z, owner.x + dx * amount, owner.z + dz * amount);
+      if (wall) amount = Math.max(0, wall.dist - 0.35);
+      if (amount < 0.08) return null;
+      return { dx, dz, amount, tx: owner.x + dx * amount, tz: owner.z + dz * amount };
+    }
+    canStartRosterDash(owner, dx, dz, distance) {
+      return !!this.rosterDashPlan(owner, dx, dz, distance);
+    }
+    startRosterDash(owner, skill, attack, dx, dz, distance, duration) {
+      if (!Number.isFinite(duration) || duration <= 0) return !1;
+      const plan = this.rosterDashPlan(owner, dx, dz, distance);
+      if (!plan) return !1;
+      owner.dash = { sx: owner.x, sz: owner.z, tx: plan.tx, tz: plan.tz, dx: plan.dx, dz: plan.dz, t: 0, duration, attack: { ...attack, skillDash: !0, skillId: attack.id, skill } , hitTargets: new Set() };
+      owner.vel.set(0, 0);
+      this.game.effects.dust(owner.x, owner.z, 5, 1.4);
+      return !0;
+    }
+    recastKunai(owner, attack) {
+      const target = owner.kunaiRecastTarget;
+      if (!target?.alive || target.airborne || !Number.isFinite(target.x) || !Number.isFinite(target.z)) {
+        owner.kunaiRecastTarget = null;
+        owner.kunaiRecastUntil = 0;
+        return !1;
+      }
+      const x = target.x - Math.sin(target.facing) * attack.dashOffset;
+      const z = target.z - Math.cos(target.facing) * attack.dashOffset;
+      const dx = x - owner.x; const dz = z - owner.z;
+      const length = Math.hypot(dx, dz);
+      if (!Number.isFinite(length) || length < 1e-8) return !1;
+      if (!this.startRosterDash(owner, 2, { ...attack, id: `kunai-recast`, damage: 0 }, dx, dz, length, 0.12)) return !1;
+      owner.kunaiRecastTarget = null;
+      owner.kunaiRecastUntil = 0;
+      return !0;
+    }
+    createCaltropsMarker(x, z) {
+      const marker = new ut();
+      const disc = new Ln(this.trapDiscGeometry, this.caltropDiscMaterial);
+      const ring = new Ln(this.trapRingGeometry, this.caltropRingMaterial);
+      disc.userData.noAO = ring.userData.noAO = !0;
+      disc.renderOrder = ring.renderOrder = 3;
+      marker.add(disc, ring);
+      for (const xSign of [-1, 1]) {
+        const spike = new Ln(this.trapSpikeGeometry, this.shrineMaterials.trap);
+        spike.position.set(xSign * 0.18, 0.22, 0);
+        spike.rotation.z = xSign * -0.28;
+        spike.userData.noAO = !0;
+        marker.add(spike);
+      }
+      marker.position.set(x, 0.055, z);
+      marker.userData.noAO = !0;
+      this.game.scene.add(marker);
+      return marker;
+    }
+    spawnRosterProjectile(owner, dx, dz, attack, skillId) {
+      if (!Number.isFinite(dx) || !Number.isFinite(dz) || !Number.isFinite(attack.speed) || !Number.isFinite(attack.range) || attack.range <= 0) return null;
+      const length = Math.hypot(dx, dz);
+      if (length < 1e-8) return null;
+      dx /= length;
+      dz /= length;
+      const muzzle = owner.muzzleWorld(new H());
+      const projectile = {
+        owner, x: muzzle.x, z: muzzle.z, dx, dz, speed: attack.speed, range: attack.range, travelled: 0,
+        damage: attack.damage, radius: skillId === `kunai-dash` ? 0.12 : 0.18, color: new J(attack.color || 0xffffff), alive: !0,
+        skillId, piercePlayers: attack.piercePlayers === !0, pierceCover: attack.pierceCover === !0, pierceCoverRemaining: attack.pierceCover ? (attack.pierceCoverCount ?? 1) : 0,
+        defenseBreak: attack.defenseBreak || 0, defenseBreakDuration: attack.defenseBreakDuration || 0,
+        blast: attack.blast || 0, knockback: attack.knockback || 0, stickyFuse: attack.fuse || 0, stickyFuseRemaining: attack.fuse || 0,
+        attachToTarget: attack.attachToTarget === !0, attachToCover: attack.attachToCover === !0, stuck: !1, stuckTarget: null, stuckCover: !1,
+        offsetX: 0, offsetZ: 0, hitTargets: new Set(),
+      };
+      this.characterProjectiles.push(projectile);
+      owner.recoil = 1;
+      this.game.effects.muzzle(muzzle.x, muzzle.y, muzzle.z, dx, dz, projectile.color, skillId === `sticky-grenade` ? 1.1 : 1.3);
+      this.game.audio.play(skillId === `sticky-grenade` ? `lob` : `shotBig`, owner.x, owner.z);
+      return projectile;
+    }
+    stepRosterDash(owner, dash, fromX, fromZ) {
+      if (![`iron-charge`, `swift-flash`].includes(dash.attack.skillId)) return;
+      for (const target of this.game.brawlers) {
+        if (target === owner || !target.alive || target.airborne || dash.hitTargets.has(target)) continue;
+        if (!segmentHitsBrawlerCircle(fromX, fromZ, owner.x, owner.z, target.x, target.z, 0.77)) continue;
+        dash.hitTargets.add(target);
+        const damage = target.takeDamage(Math.round(dash.attack.damage * owner.damageMul), owner, !1, { kind: `skill`, dirX: dash.dx, dirZ: dash.dz });
+        if (damage <= 0 || target.lastDamageBlocked || !target.alive) continue;
+        if (dash.attack.knockback) this.displaceBrawler(target, target.x - owner.x, target.z - owner.z, dash.attack.knockback);
+        if (dash.attack.skillId === `iron-charge`) {
+          target.skill2Charge = null; target.skill2Charging = !1; target.isCharging = !1; target.chargeLevel = 0;
+          break;
+        }
+      }
+    }
+    finishRosterDash(owner, dash) {
+      if (dash.attack.restoreAmmo && owner.usesAmmo) owner.ammo = Math.min(owner.maxAmmo, owner.ammo + dash.attack.restoreAmmo);
+      if (dash.attack.skillId === `kunai-recast`) this.game.effects.impact(owner.x, 0.76, owner.z, new J(0xd9e1dc), 8);
+    }
     gojoRepulse(owner, dx, dz, attack) {
       const end = this.skillLineEnd(owner, dx, dz, attack.range);
       for (const target of this.skillLineTargets(owner, end, attack.width)) {
@@ -479,12 +702,34 @@ var Su = class {
       this.game.effects.impact(end.x, 0.08, end.z, new J(attack.color || 0xe52d45), 14);
       this.game.audio.play(`shotBig`, owner.x, owner.z);
     }
+    createShrineVisual() {
+      const shrine = new ut();
+      shrine.name = `malevolent-shrine`;
+      shrine.userData.noAO = !0;
+      shrine.userData.sharedShrineMaterial = !0;
+      const groups = [
+        [this.shrineMaterials.wood, mergeStaticBoxes(`malevolent-shrine-wood`, [[0, 0.12, 0, 2.8, 0.22, 2.2], [0, 1.88, -0.72, 2.52, 0.25, 0.28], [0, 1.88, 0.72, 2.52, 0.25, 0.28], [0, 1.18, 0, 0.62, 0.82, 0.3]])],
+        [this.shrineMaterials.red, mergeStaticBoxes(`malevolent-shrine-red`, [[-0.92, 1.02, -0.72, 0.19, 1.62, 0.19], [-0.92, 1.02, 0.72, 0.19, 1.62, 0.19], [0.92, 1.02, -0.72, 0.19, 1.62, 0.19], [0.92, 1.02, 0.72, 0.19, 1.62, 0.19], [0, 2.32, 0, 2.95, 0.12, 2.3]])],
+        [this.shrineMaterials.roof, mergeStaticBoxes(`malevolent-shrine-roof`, [[0, 2.12, 0, 3.45, 0.28, 2.72], [0, 2.48, 0, 2.48, 0.2, 1.96]])],
+        [this.shrineMaterials.gold, mergeStaticBoxes(`malevolent-shrine-gold`, [[-0.92, 0.28, -0.72, 0.34, 0.18, 0.34], [-0.92, 0.28, 0.72, 0.34, 0.18, 0.34], [0.92, 0.28, -0.72, 0.34, 0.18, 0.34], [0.92, 0.28, 0.72, 0.34, 0.18, 0.34], [0, 1.92, -0.78, 2.92, 0.13, 0.34], [0, 2.61, -0.03, 1.48, 0.1, 0.24], [0, 0.9, 0.2, 1.12, 0.08, 0.58]])],
+      ];
+      for (const [material, geometry] of groups) {
+        const mesh = new Ln(geometry, material);
+        mesh.userData.noAO = !0;
+        mesh.userData.sharedShrineMaterial = !0;
+        mesh.castShadow = !1;
+        mesh.receiveShadow = !1;
+        shrine.add(mesh);
+      }
+      return shrine;
+    }
     startCharacterArea(owner, kind, x, z, attack, isSuper = !1) {
+      const smoke = kind === `smoke-screen`;
       const dx = Number.isFinite(x) ? x - owner.x : Math.sin(owner.facing);
       const dz = Number.isFinite(z) ? z - owner.z : Math.cos(owner.facing);
       const distance = Math.hypot(dx, dz);
       const range = attack.range || 0;
-      const end = this.skillLineEnd(owner, dx, dz, Math.min(range, distance || range));
+      const end = smoke ? { x: owner.x, z: owner.z } : this.skillLineEnd(owner, dx, dz, Math.min(range, distance || range));
       x = $c(end.x, -21.4, 21.4);
       z = $c(end.z, -21.4, 21.4);
       const marker = new ut();
@@ -508,11 +753,22 @@ var Su = class {
         orb.userData.noAO = true;
         marker.add(orb);
       }
+      let shrine = null;
+      if (kind === `sukuna-zone`) {
+        shrine = this.createShrineVisual();
+        marker.add(shrine);
+      }
+      if (smoke) {
+        disc.material.color.set(0x85918c);
+        ring.material.color.set(0xb8c2bc);
+        disc.material.opacity = 0.2;
+        ring.material.opacity = 0.48;
+      }
       marker.position.set(x, 0.055, z);
       marker.scale.setScalar((attack.radius || 2.4) / 3.4);
       this.game.scene.add(marker);
       const area = {
-        owner, kind, x, z, attack, marker, disc, ring, orb,
+        owner, kind, x, z, attack, marker, disc, ring, orb, shrine,
         remaining: isSuper ? attack.warningDelay + attack.duration : attack.duration,
         warningRemaining: isSuper ? attack.warningDelay : 0,
         activeRemaining: isSuper ? attack.duration : attack.duration,
@@ -521,13 +777,29 @@ var Su = class {
         waves: attack.waveCount || 0,
         hitTargets: new Set(),
         blockedTargets: new Set(),
-        slowKey: `gojo:${owner.networkId || owner.id}`,
+        slowKey: smoke ? `smoke:${owner.id}:${this.characterAreas.length}` : `gojo:${owner.networkId || owner.id}`,
       };
       this.characterAreas.push(area);
       owner.attackSerial++;
       owner.recoil = 0.9;
+      if (isSuper && kind === `gojo-domain`) this.playGojoSuperVfx(owner, x, z);
+      if (isSuper && kind === `sukuna-zone`) {
+        this.game.effects.ring(x, z, attack.radius || 4.5, new J(attack.color || 0xe52d45), 0.8, 1.5);
+        this.game.effects.dust(x, z, 8, 2.2);
+      }
       if (!isSuper) this.game.audio.play(`zap`, owner.x, owner.z);
       return area;
+    }
+    playGojoSuperVfx(owner, x = owner.x, z = owner.z) {
+      const blue = new J(0x7eabff);
+      this.game.effects.flash(x, 1.05, z, blue, 30, 9, 0.34);
+      this.game.effects.burst(x, 0.92, z, blue, 24, 3.4);
+      this.game.effects.ring(x, z, 3.8, blue, 0.48, 2.6);
+      this.game.effects.electricImpact(x, 0.8, z, blue, !0);
+      for (let index = 0; index < 10; index++) {
+        const angle = index / 10 * Math.PI * 2;
+        this.game.effects.spark(x + Math.cos(angle) * 1.55, 0.58 + (index % 3) * 0.22, z + Math.sin(angle) * 1.55, blue);
+      }
     }
     hitCharacterArea(area) {
       const { owner, x, z, attack } = area;
@@ -571,6 +843,17 @@ var Su = class {
       this.game.effects.explosion(x, z, radius, color, !1);
       this.game.audio.play(`boom`, x, z);
     }
+    detonateStickyGrenade(projectile, x, z) {
+      const radius = projectile.blast;
+      for (const target of this.game.brawlers) {
+        if (!target.alive || target === projectile.owner || target.airborne || Math.hypot(target.x - x, target.z - z) > radius + 0.45) continue;
+        const dealt = target.takeDamage(Math.round(projectile.damage * projectile.owner.damageMul), projectile.owner, !1, { kind: `explosion`, x, z });
+        if (dealt > 0 && projectile.knockback > 0) this.displaceBrawler(target, target.x - x, target.z - z, projectile.knockback);
+      }
+      this.breakCoverCircle(x, z, radius);
+      this.game.effects.explosion(x, z, radius, projectile.color, !1);
+      this.game.audio.play(`boom`, x, z);
+    }
     spawnSukunaFlame(owner, dx, dz, damage, range, chargedAttack) {
       const length = Math.hypot(dx, dz) || 1;
       dx /= length;
@@ -587,6 +870,7 @@ var Su = class {
       this.game.audio.play(`shotBig`, owner.x, owner.z);
     }
     updateCharacterAreas(dt) {
+      for (const brawler of this.game.brawlers) brawler.smokeConcealed = !1;
       let live = 0;
       for (const area of this.characterAreas) {
         if (!area.activated) {
@@ -626,6 +910,14 @@ var Su = class {
             const distance = Math.hypot(dx, dz);
             if (distance > 0.08) this.displaceBrawler(target, dx, dz, Math.min(distance, area.attack.pullSpeed * dt));
           }
+        } else if (area.kind === `smoke-screen`) {
+          area.activeRemaining -= dt;
+          area.remaining = area.activeRemaining;
+          if (area.owner.alive && area.owner.smokeRevealT <= 0 && Math.hypot(area.owner.x - area.x, area.owner.z - area.z) <= area.attack.radius) area.owner.smokeConcealed = !0;
+          for (const target of this.game.brawlers) {
+            if (target === area.owner || !target.alive || target.airborne || Math.hypot(target.x - area.x, target.z - area.z) > area.attack.radius + 0.45) continue;
+            target.slowEffects.set(area.slowKey, { multiplier: 1 - area.attack.slow, remaining: 0.35 });
+          }
         } else if (area.kind === `sukuna-zone`) {
           area.activeRemaining -= dt;
           area.nextWave -= dt;
@@ -641,6 +933,7 @@ var Su = class {
         if (area.disc?.material) area.disc.material.opacity = area.activated ? 0.12 : 0.07 + Math.max(0, Math.sin(this.game.elapsed * 18)) * 0.08;
         if (area.ring?.material) area.ring.material.opacity = area.activated ? 0.8 : 0.55 + Math.max(0, Math.sin(this.game.elapsed * 18)) * 0.4;
         area.marker.scale.setScalar((area.attack.radius || 2.4) / 3.4 * (area.activated ? 1 + Math.sin(this.game.elapsed * 13) * 0.018 : 1));
+        if (area.shrine) area.shrine.rotation.y = Math.sin(this.game.elapsed * 0.25) * 0.025;
         if (area.orb) {
           const fade = $c(area.remaining / 0.22, 0, 1);
           area.orb.position.y = 0.76 + Math.sin(this.game.elapsed * 8) * 0.09;
@@ -658,52 +951,175 @@ var Su = class {
       }
       this.characterAreas.length = live;
     }
+    updateRosterSkillTraps(dt) {
+      let live = 0;
+      for (const trap of this.characterTraps) {
+        trap.remaining -= dt;
+        let trigger = null;
+        for (const target of this.game.brawlers) {
+          if (!target.alive || target === trap.owner || target.airborne || Math.hypot(target.x - trap.x, target.z - trap.z) > trap.attack.radius + 0.45) continue;
+          trigger = target;
+          target.slowEffects.set(`caltrops:${trap.owner.id}`, { multiplier: 1 - trap.attack.slow, remaining: trap.attack.damageDuration });
+          target.applyStatusDoT(`bleed`, trap.owner, trap.attack.damagePerSecond, trap.attack.damageDuration);
+          this.game.effects.impact(trap.x, 0.22, trap.z, this.shrineMaterials.gold.color, 9);
+          break;
+        }
+        if (trigger || trap.remaining <= 0) {
+          trap.marker.removeFromParent();
+          continue;
+        }
+        trap.marker.rotation.y += dt * 0.45;
+        trap.marker.children[0].material.opacity = 0.28 + Math.sin(this.game.elapsed * 7) * 0.08;
+        this.characterTraps[live++] = trap;
+      }
+      this.characterTraps.length = live;
+    }
     updateCharacterProjectiles(dt) {
       let live = 0;
       let count = 0;
       const matrices = this.characterProjectileMesh;
+      const rayOptions = this.projectileRayOptions ||= {};
       for (const projectile of this.characterProjectiles) {
-        const step = Math.min(projectile.speed * dt, Math.max(0, projectile.range - projectile.travelled));
-        const fromX = projectile.x;
-        const fromZ = projectile.z;
-        let toX = fromX + projectile.dx * step;
-        let toZ = fromZ + projectile.dz * step;
-        const wall = step > 0 ? this.game.world.raycast(fromX, fromZ, toX, toZ) : null;
-        if (wall) {
-          const distance = Math.max(0, wall.dist - 0.05);
-          toX = fromX + projectile.dx * distance;
-          toZ = fromZ + projectile.dz * distance;
-        }
-        projectile.x = toX;
-        projectile.z = toZ;
-        projectile.travelled += Math.hypot(toX - fromX, toZ - fromZ);
-        let hitTarget = null;
-        let hitDistance = Infinity;
-        for (const target of this.game.brawlers) {
-          if (!target.alive || target === projectile.owner || target.airborne) continue;
-          const vx = toX - fromX;
-          const vz = toZ - fromZ;
-          const lengthSq = vx * vx + vz * vz;
-          const along = lengthSq > 1e-8 ? $c(((target.x - fromX) * vx + (target.z - fromZ) * vz) / lengthSq, 0, 1) : 0;
-          const x = fromX + vx * along;
-          const z = fromZ + vz * along;
-          const distance = Math.hypot(target.x - x, target.z - z);
-          if (distance <= 0.45 + (projectile.radius || 0.18) && along < hitDistance) { hitTarget = target; hitDistance = along; }
-        }
-        if (hitTarget) {
-          if (projectile.blast > 0) this.detonateSukunaFlame(projectile, toX, toZ);
-          else {
-            const dealt = hitTarget.takeDamage(Math.round(projectile.damage * projectile.owner.damageMul), projectile.owner, !1, { kind: `skill-flame`, dirX: projectile.dx, dirZ: projectile.dz });
-            projectile.owner.onAttackHit(hitTarget, { a: { kind: `skill-flame` }, attackId: projectile.owner.attackSerial, travel: projectile.travelled, range: projectile.range, melee: !1 }, dealt);
-            this.game.effects.impact(toX, 0.72, toZ, projectile.color, 8);
+        if (!Number.isFinite(projectile.x) || !Number.isFinite(projectile.z)) continue;
+        projectile.travelled = Number.isFinite(projectile.travelled) ? projectile.travelled : 0;
+        projectile.hitTargets ||= new Set();
+        if (projectile.stuck) {
+          if (projectile.stuckTarget) {
+            if (projectile.stuckTarget.alive) {
+              projectile.x = projectile.stuckTarget.x + projectile.offsetX;
+              projectile.z = projectile.stuckTarget.z + projectile.offsetZ;
+            } else {
+              projectile.stuckTarget = null;
+              projectile.stuckCover = true;
+            }
+          }
+          projectile.stickyFuseRemaining = Math.max(0, projectile.stickyFuseRemaining - dt);
+          if (projectile.stickyFuseRemaining <= 0) {
+            this.detonateStickyGrenade(projectile, projectile.x, projectile.z);
+            continue;
+          }
+          this.characterProjectiles[live++] = projectile;
+          if (count < matrices.instanceMatrix.count) {
+            pu.compose(hu.set(projectile.x, 0.55, projectile.z), mu.identity(), gu.setScalar(0.85));
+            matrices.setMatrixAt(count, pu); matrices.setColorAt(count, projectile.color); count++;
           }
           continue;
         }
-        if (wall || projectile.travelled >= projectile.range) {
-          if (projectile.blast > 0) this.detonateSukunaFlame(projectile, toX, toZ);
-          else this.game.effects.impact(toX, 0.72, toZ, projectile.color, 4);
-          continue;
+        const range = Number.isFinite(projectile.range) ? projectile.range : 0;
+        let remaining = Math.min(
+          Number.isFinite(projectile.speed) ? Math.max(0, projectile.speed * dt) : 0,
+          Math.max(0, range - (projectile.travelled || 0)),
+        );
+        let removed = false;
+        while (remaining > 1e-8 && !removed) {
+          const step = Math.min(remaining, 0.2);
+          const fromX = projectile.x;
+          const fromZ = projectile.z;
+          let toX = fromX + projectile.dx * step;
+          let toZ = fromZ + projectile.dz * step;
+          rayOptions.ignoreTile = projectile.piercedCoverTile || null;
+          let wall = this.game.world.raycast(fromX, fromZ, toX, toZ, rayOptions);
+          if (wall && projectile.pierceCoverRemaining > 0 && this.game.world.isBreakable(wall.tx, wall.ty)) {
+            projectile.piercedCoverTile = { x: wall.tx, z: wall.ty };
+            projectile.pierceCoverRemaining--;
+            rayOptions.ignoreTile = projectile.piercedCoverTile;
+            wall = this.game.world.raycast(fromX, fromZ, toX, toZ, rayOptions);
+          }
+          if (wall) {
+            const distance = Math.max(0, wall.dist - 0.05);
+            toX = fromX + projectile.dx * distance;
+            toZ = fromZ + projectile.dz * distance;
+          }
+          projectile.x = toX;
+          projectile.z = toZ;
+          projectile.travelled += Math.hypot(toX - fromX, toZ - fromZ);
+          remaining -= step;
+          let hitTarget = null;
+          let hitDistance = Infinity;
+          const vx = toX - fromX;
+          const vz = toZ - fromZ;
+          const lengthSq = vx * vx + vz * vz;
+          for (const target of this.game.brawlers) {
+            if (!target.alive || target === projectile.owner || target.airborne || projectile.hitTargets.has(target)) continue;
+            const along = lengthSq > 1e-8 ? $c(((target.x - fromX) * vx + (target.z - fromZ) * vz) / lengthSq, 0, 1) : 0;
+            const x = fromX + vx * along;
+            const z = fromZ + vz * along;
+            const distance = Math.hypot(target.x - x, target.z - z);
+            if (distance <= 0.45 + (projectile.radius || 0.18) && along < hitDistance) { hitTarget = target; hitDistance = along; }
+          }
+          if (hitTarget) {
+            if (projectile.stickyFuse > 0 && projectile.attachToTarget) {
+              projectile.stuck = !0;
+              projectile.stuckTarget = hitTarget;
+              projectile.stuckCover = !1;
+              projectile.offsetX = toX - hitTarget.x;
+              projectile.offsetZ = toZ - hitTarget.z;
+              projectile.x = toX;
+              projectile.z = toZ;
+              projectile.stickyFuseRemaining = projectile.stickyFuse;
+              this.game.effects.impact(toX, 0.8, toZ, projectile.color, 6);
+              removed = !0;
+              break;
+            }
+            if (projectile.blast > 0) {
+              this.detonateSukunaFlame(projectile, toX, toZ);
+              removed = !0;
+              break;
+            }
+            const dealt = hitTarget.takeDamage(Math.round(projectile.damage * projectile.owner.damageMul), projectile.owner, !1, { kind: `skill-flame`, dirX: projectile.dx, dirZ: projectile.dz, defenseBreakDuration: projectile.defenseBreakDuration });
+            projectile.owner.onAttackHit(hitTarget, { a: { kind: `skill-flame` }, attackId: projectile.owner.attackSerial, travel: projectile.travelled, range, melee: !1 }, dealt);
+            if (projectile.defenseBreak && dealt > 0) hitTarget.defenseBreakT = Math.max(hitTarget.defenseBreakT || 0, projectile.defenseBreakDuration);
+            if (projectile.skillId === `kunai-dash` && dealt > 0) {
+              projectile.owner.kunaiRecastTarget = hitTarget;
+              projectile.owner.kunaiRecastUntil = this.game.matchTime + 2;
+            }
+            projectile.hitTargets.add(hitTarget);
+            this.game.effects.impact(toX, 0.72, toZ, projectile.color, 8);
+            if (!projectile.piercePlayers) {
+              removed = !0;
+              break;
+            }
+          }
+          if (wall) {
+            if (projectile.stickyFuse > 0 && projectile.attachToCover) {
+              projectile.stuck = !0;
+              projectile.stuckTarget = null;
+              projectile.stuckCover = !0;
+              projectile.stickyFuseRemaining = projectile.stickyFuse;
+              removed = !0;
+              break;
+            }
+            if (projectile.blast > 0) this.detonateSukunaFlame(projectile, toX, toZ);
+            else this.game.effects.impact(toX, 0.72, toZ, projectile.color, 4);
+            removed = !0;
+            break;
+          }
+          if (projectile.travelled >= range - 1e-8) {
+            if (projectile.stickyFuse > 0 && projectile.attachToCover) {
+              projectile.stuck = !0;
+              projectile.stuckTarget = null;
+              projectile.stuckCover = !0;
+              projectile.stickyFuseRemaining = projectile.stickyFuse;
+              removed = !0;
+              break;
+            }
+            if (projectile.blast > 0) this.detonateSukunaFlame(projectile, toX, toZ);
+            else this.game.effects.impact(toX, 0.72, toZ, projectile.color, 4);
+            removed = !0;
+            break;
+          }
         }
+        if (!removed && projectile.travelled >= range - 1e-8) {
+          if (projectile.stickyFuse > 0 && projectile.attachToCover) {
+            projectile.stuck = !0;
+            projectile.stuckTarget = null;
+            projectile.stuckCover = !0;
+            projectile.stickyFuseRemaining = projectile.stickyFuse;
+          } else if (projectile.blast > 0) this.detonateSukunaFlame(projectile, projectile.x, projectile.z);
+          else this.game.effects.impact(projectile.x, 0.72, projectile.z, projectile.color, 4);
+          removed = !0;
+        }
+        if (removed) continue;
         if (count < matrices.instanceMatrix.count) {
           _u.set(0, Math.atan2(projectile.dx, projectile.dz), 0);
           mu.setFromEuler(_u);
@@ -762,6 +1178,7 @@ var Su = class {
           : (n.effects.debris(r.x, 0.6, r.z, [12166540, 11565628, 10116910, 5216842][r.style] ?? 12166540, 10),
             n.effects.dust(r.x, r.z, 8, 2.2),
             n.audio.play(`crate`, r.x, r.z)));
+      return !!r;
     }
     explode(e, t, n, r, i, a = !1) {
       let o = this.game,
@@ -806,7 +1223,9 @@ var Su = class {
         i = t.effects,
         a = Ic + 0.06,
         o = 0;
-      const weaponCounts = { shuriken: 0, arrow: 0 };
+      const weaponCounts = this.weaponCounts || (this.weaponCounts = { shuriken: 0, arrow: 0 });
+      weaponCounts.shuriken = 0;
+      weaponCounts.arrow = 0;
       for (let s of this.bullets) {
         let c = s.speed * e;
         for (; c > 0 && s.alive;) {
@@ -825,34 +1244,52 @@ var Su = class {
             }
             ((s.dx = dx / distance), (s.dz = dz / distance));
           }
-          let e = Math.min(c, 0.2);
-          ((c -= e),
-            (s.x += s.dx * e),
-            (s.z += s.dz * e),
-            (s.travel += e),
-            (s.phaseTravel += e));
-          let r = n.toTile(s.x),
-            o = n.toTile(s.z);
-          if (n.blocksShots(r, o)) {
-            let e = this.boxAt(r, o);
-            if (
-              (e
-                ? (this.damageBox(e, s.damage, s.owner), (s.alive = !1))
-                : s.a.breaksWalls && n.isBreakable(r, o)
-                  ? (this.breakTile(r, o), s.a.pierce || (s.alive = !1))
-                  : (s.alive = !1),
-              !s.alive)
-            ) {
-              if (this.beginReturn(s)) {
-                s.alive = !0;
-                break;
-              }
-              s.a.electric
-                ? i.electricImpact(s.x - s.dx * 0.12, yu, s.z - s.dz * 0.12, s.color, s.isSuper)
-                : i.impact(s.x - s.dx * 0.12, yu, s.z - s.dz * 0.12, s.color, s.melee ? 3 : 6);
+          let step = Math.min(c, 0.2);
+          const previousX = s.x;
+          const previousZ = s.z;
+          const rayOptions = this.projectileRayOptions ||= {};
+          rayOptions.ignoreTile = s.piercedCoverTile || null;
+          let blocker = n.raycast(previousX, previousZ, previousX + s.dx * step, previousZ + s.dz * step, rayOptions);
+          if (blocker && s.a.pierceCover && s.pierceCoverRemaining > 0 && n.isBreakable(blocker.tx, blocker.ty)) {
+            s.piercedCoverTile = { x: blocker.tx, z: blocker.ty };
+            s.pierceCoverRemaining--;
+            rayOptions.ignoreTile = s.piercedCoverTile;
+            blocker = n.raycast(previousX, previousZ, previousX + s.dx * step, previousZ + s.dz * step, rayOptions);
+          }
+          const moved = blocker ? Math.max(0, blocker.dist - 0.05) : step;
+          s.x = previousX + s.dx * moved;
+          s.z = previousZ + s.dz * moved;
+          s.travel += moved;
+          s.phaseTravel += moved;
+          c -= moved;
+          const tileX = blocker?.tx ?? n.toTile(s.x);
+          const tileZ = blocker?.ty ?? n.toTile(s.z);
+          const isPiercedCoverTile = s.piercedCoverTile?.x === tileX && s.piercedCoverTile?.z === tileZ;
+          if (blocker && !isPiercedCoverTile) {
+            const box = this.boxAt(tileX, tileZ);
+            if (box) {
+              this.damageBox(box, s.damage, s.owner);
+              s.alive = !1;
+            } else if (s.a.breaksWalls && n.isBreakable(tileX, tileZ)) {
+              this.breakTile(tileX, tileZ);
+              if (!s.a.pierce) s.alive = !1;
+            } else {
+              s.alive = !1;
+            }
+          } else if (!blocker && s.a.breaksWalls) {
+            const bushTile = n.tiles[tileZ * 44 + tileX] === Z.BUSH;
+            bushTile && this.breakTile(tileX, tileZ);
+          }
+          if (!s.alive) {
+            if (this.beginReturn(s)) {
+              s.alive = !0;
               break;
             }
-          } else s.a.breaksWalls && n.tiles[o * 44 + r] === Z.BUSH && this.breakTile(r, o);
+            s.a.electric
+              ? i.electricImpact(s.x - s.dx * 0.12, yu, s.z - s.dz * 0.12, s.color, s.isSuper)
+              : i.impact(s.x - s.dx * 0.12, yu, s.z - s.dz * 0.12, s.color, s.melee ? 3 : 6);
+            break;
+          }
           for (let target of t.brawlers) {
             if (!target.alive || target === s.owner || target.airborne || s.hitTargets.has(target)) continue;
             let dx = target.x - s.x,
@@ -1090,6 +1527,7 @@ var Su = class {
       this.items.length = liveItems;
       this.updateCharacterAreas(e);
       this.updateCharacterProjectiles(e);
+      this.updateRosterSkillTraps(e);
     }
     clear() {
       let e = this.game.scene;
@@ -1101,6 +1539,8 @@ var Su = class {
         for (const target of this.game.brawlers) target.slowEffects?.delete(area.slowKey);
       }
       this.characterAreas.length = 0;
+      for (const trap of this.characterTraps) trap.marker.removeFromParent();
+      this.characterTraps.length = 0;
       this.characterProjectiles.length = 0;
       this.characterProjectileMesh.count = 0;
       for (let shower of this.arrowShowers) shower.marker.removeFromParent();

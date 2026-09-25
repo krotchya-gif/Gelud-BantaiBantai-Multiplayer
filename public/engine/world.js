@@ -212,7 +212,7 @@ var ol = (e, t, n, r) => (e - n) * (e - n) + (t - r) * (t - r),
         HemisphereLight = this.pipeline.isWebGPU ? window.__GBH_LIGHTS__.HemisphereLight : ri,
         n = new DirectionalLight(16777215, 3);
       ((n.name = `key`),
-        (n.castShadow = !0),
+        (n.castShadow = !this.pipeline.isWebGPU),
         n.shadow.mapSize.set(this.mapSize, this.mapSize),
         (n.shadow.camera.near = 1),
         (n.shadow.camera.far = 121),
@@ -234,7 +234,7 @@ var ol = (e, t, n, r) => (e - n) * (e - n) + (t - r) * (t - r),
       ((this.focus = new H()),
         (this.lamps = []),
         (this.lampSlots = []),
-        (this.lampShadowSlots = 4),
+        (this.lampShadowSlots = this.pipeline.isWebGPU ? 0 : 4),
         (this.lampGlass = null),
         (this.cones = []),
         (this.coneMaterial = this.pipeline.isWebGPU
@@ -312,10 +312,8 @@ var ol = (e, t, n, r) => (e - n) * (e - n) + (t - r) * (t - r),
       (t.map.dispose(), (t.map = null));
     }
     applyQuality(e) {
-      // WebGPU can still have the previous shadow map referenced by an
-      // in-flight command buffer when a quality change resizes it. Keep its
-      // shadow targets stable for the renderer lifetime; quality still changes
-      // shadow casting, pixel ratio, and light count without replacing textures.
+      // Keep WebGPU light and shadow topology fixed. Changing active light counts
+      // or shadow casters rebuilds pipelines on demand and can stall a live match.
       let shadowMapSize = this.pipeline.isWebGPU ? 2048 : e.shadowMap;
       let lampMapSize = this.pipeline.isWebGPU ? 1024 : e.lampMap;
       ((this.tier = e.tier),
@@ -325,9 +323,10 @@ var ol = (e, t, n, r) => (e - n) * (e - n) + (t - r) * (t - r),
           ((this.mapSize = shadowMapSize),
           this.key.shadow.mapSize.set(shadowMapSize, shadowMapSize),
           this.invalidateShadowMap(this.key)),
-        this.setPoolSize(e.poolLights),
+        this.pipeline.isWebGPU && (this.key.castShadow = !1),
+        this.setPoolSize(this.pipeline.isWebGPU ? 4 : e.poolLights),
         this.lampSlots.forEach((t, n) => {
-          let r = e.lampShadows && n < this.lampShadowSlots;
+          let r = !this.pipeline.isWebGPU && e.lampShadows && n < this.lampShadowSlots;
           (t.castShadow !== r && (t.castShadow = r),
             t.shadow.mapSize.x !== lampMapSize &&
               (t.shadow.mapSize.set(lampMapSize, lampMapSize),
@@ -359,7 +358,7 @@ var ol = (e, t, n, r) => (e - n) * (e - n) + (t - r) * (t - r),
       for (let t = 0; t < e; t++) {
         let e = new SpotLight(ml, 0, Rc.far, Rc.angle, 0.55, gl);
         (e.position.set(0, Rc.height, 0),
-          (e.castShadow = t < this.lampShadowSlots),
+          (e.castShadow = !this.pipeline.isWebGPU && t < this.lampShadowSlots),
           e.shadow.mapSize.set(1024, 1024),
           (e.shadow.camera.near = Rc.near),
           (e.shadow.camera.far = Rc.far),
@@ -1814,6 +1813,7 @@ varying vec3 vBladeWorld;`,
       }
     }
     raycast(e, t, n, r, i = {}) {
+      if (!Number.isFinite(e) || !Number.isFinite(t) || !Number.isFinite(n) || !Number.isFinite(r)) return null;
       let a = this.toTile(e),
         o = this.toTile(t),
         s = n - e,
@@ -1833,7 +1833,7 @@ varying vec3 vBladeWorld;`,
         b = 0;
       for (let n = 0; n < 160; n++) {
         if ((v < y ? ((b = v), (v += m), (a += f)) : ((b = y), (y += h), (o += p)), b > l)) return null;
-        if (this.blocksShots(a, o))
+        if (this.blocksShots(a, o) && !(i.ignoreTile && i.ignoreTile.x === a && i.ignoreTile.z === o))
           return ((i.tx = a), (i.ty = o), (i.dist = b), (i.x = e + u * b), (i.z = t + d * b), i);
       }
       return null;

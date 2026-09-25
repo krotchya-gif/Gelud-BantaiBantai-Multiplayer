@@ -60,7 +60,7 @@ var Yc = {
         (r.outputColorSpace = k),
         (r.toneMapping = 4),
         (r.toneMappingExposure = 1),
-        (r.shadowMap.enabled = !0),
+        (r.shadowMap.enabled = !this.isWebGPU),
         (r.shadowMap.type = +!this.pcssAvailable),
         (r.shadowMap.autoUpdate = !1),
         r.setClearColor(724506, 1),
@@ -78,7 +78,8 @@ var Yc = {
         (this.shadowLightsDirty = !0),
         (this.shadowUpdateInterval = 1000 / 30),
         (this.lastShadowUpdate = -Infinity),
-        (this.shadowUpdateRequested = !0));
+        (this.shadowUpdateRequested = !0),
+        (this.performanceScale = 1));
     }
     get usingPCSS() {
       return this.pcssAvailable && this.quality.pcss;
@@ -102,9 +103,15 @@ var Yc = {
       ((this.shadowUpdateRequested = !0), e && (this.shadowLightsDirty = !0));
     }
     getPixelRatio(e, t) {
-      let n = Math.max(0.25, this.superSample || Math.min(window.devicePixelRatio || 1, this.quality.dpr)),
+      let n = Math.max(0.25, (this.superSample || Math.min(window.devicePixelRatio || 1, this.quality.dpr)) * this.performanceScale),
         r = window.matchMedia && window.matchMedia(`(pointer: coarse)`).matches ? this.maxPixelsCoarse : this.maxPixelsFine;
       return (n *= Math.min(1, Math.sqrt(r / Math.max(1, e * t * n * n)))), n;
+    }
+    setPerformanceScale(e) {
+      let n = $c(Number(e) || 1, 0.6, 1);
+      if (Math.abs(n - this.performanceScale) < 0.005) return !1;
+      ((this.performanceScale = n), this.resize());
+      return !0;
     }
     setSize(e, t, n = this.getPixelRatio(e, t)) {
       let r = this.renderer;

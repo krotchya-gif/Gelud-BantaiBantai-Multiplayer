@@ -35,6 +35,7 @@ var  Ru = 9,
       let gameplay = this.game.world.biomeGameplay,
         vision = gameplay?.vision ?? 1,
         concealment = gameplay?.bushConcealment ?? 1;
+      if ((e.smokeConcealed || e.stealthT > 0) && t > 1.8) return !1;
       return t > Ru * vision || (e.inBush && t > Bu * concealment && e.revealT <= 0)
         ? !1
         : this.thrower && t < 8 * vision
@@ -68,7 +69,7 @@ var  Ru = 9,
           }
         let score = r * (0.62 + (n.hp / n.maxHp) * 0.38) * (i ? 0.7 : 1),
           targetVisible = this.canSee(n, r) ||
-            ((this.spawnHuntT > 0 || t.modeName === `deathmatch` || n === this.target) && !n.inBush);
+            ((this.spawnHuntT > 0 || t.modeName === `deathmatch` || n === this.target) && !n.inBush && !n.smokeConcealed && !(n.stealthT > 0));
         score < bestScore && targetVisible && ((a = n), (o = r), (bestScore = score));
       }
       (a !== this.target && (this.reactT = Q(0.22, 0.5) * (2 - this.skill) * t.difficulty.react), (this.target = a));
@@ -238,6 +239,38 @@ var  Ru = 9,
         if (distance > 3.4 && distance <= b.def.skills[1].tapRange && b.skillCooldowns[1] <= 0 && Math.random() < 0.5) {
           const aim = aimAtTarget(1);
           return b.useSkill(2, `start`, aim.dx, aim.dz, aim.x, aim.z);
+        }
+      } else {
+        const incoming = !!b.game.combat.incomingBullet(b, 0.5);
+        const ready = (index) => b.skillCooldowns[index] <= 0;
+        const activate = (skill, targetPosition = true) => {
+          const aim = aimAtTarget(skill - 1);
+          return b.useSkill(skill, `activate`, aim.dx, aim.dz, targetPosition ? aim.x : b.x + aim.dx * b.def.skills[skill - 1].range, targetPosition ? aim.z : b.z + aim.dz * b.def.skills[skill - 1].range);
+        };
+        if (b.def.id === `dusty`) {
+          if (distance >= 1.5 && distance <= 4.4 && ready(1)) return activate(2);
+          if ((distance < 2.4 || b.ammo <= 1) && ready(0)) return activate(1, false);
+        } else if (b.def.id === `ace`) {
+          if (distance <= 9 && ready(0)) return activate(1);
+          if ((distance < 3.6 || incoming) && ready(1)) return activate(2, false);
+        } else if (b.def.id === `fuse`) {
+          if (distance >= 1.5 && distance <= 4.5 && ready(0)) return activate(1);
+          if (distance <= 3.2 && ready(1)) return activate(2, false);
+        } else if (b.def.id === `titan`) {
+          if (distance >= 1.3 && distance <= 4.4 && ready(0)) return activate(1);
+          if (distance <= 3.5 && ready(1)) return activate(2, false);
+        } else if (b.def.id === `volt`) {
+          if (distance <= 6.5 && ready(0)) return activate(1);
+          if (distance <= b.def.attack.range && ready(1) && Math.random() < 0.6) return activate(2, false);
+        } else if (b.def.id === `naka`) {
+          if ((distance <= 3 || incoming) && ready(0)) return activate(1, false);
+          if (distance >= 2 && distance <= 6 && (ready(1) || (b.kunaiRecastTarget && b.game.matchTime < b.kunaiRecastUntil))) return activate(2);
+        } else if (b.def.id === `ello`) {
+          if ((incoming || distance <= 2.7) && ready(0)) return activate(1, false);
+          if (distance >= 1.2 && distance <= 4.2 && ready(1)) return activate(2);
+        } else if (b.def.id === `syafiah`) {
+          if (distance >= 5 && ready(0)) return activate(1, false);
+          if (distance <= 4 && ready(1)) return activate(2, false);
         }
       }
       return !1;
@@ -636,10 +669,14 @@ var  Ru = 9,
         (this.lastDmClock = ``),
         (this.lastTimeLabel = ``),
         (this.lastLeaderboardKey = ``),
-        (this.lastGasWarning = null),
-        (this.lastKillLine = ``),
-        (this.lastSuper = -1),
-        (this.lastItemUi = []),
+         (this.lastGasWarning = null),
+         (this.lastKillLine = ``),
+         (this.lastSuper = -1),
+         this.projectScratch = {},
+         this.stickCenter = [0, 0],
+         this.stickAnchors = { move: [0, 0], aim: [0, 0] },
+         this.stickKeys = [`move`, `aim`],
+         (this.lastItemUi = []),
         (this.lastFlickerUi = ``),
         (this.statsT = 0),
         (this.frames = 0),
@@ -661,23 +698,26 @@ var  Ru = 9,
         t = window.innerWidth,
         n = window.innerHeight,
         attackBounds = this.attackControl?.getBoundingClientRect(),
-        attackCenter = attackBounds
-          ? [attackBounds.left + attackBounds.width / 2, attackBounds.top + attackBounds.height / 2]
-          : [this.game.leftHanded ? 80 : t - 80, n - 80],
-        r = {
-          move: this.game.leftHanded
-            ? [t - Math.max(96, t * 0.14), n - 118]
-            : [Math.max(96, t * 0.14), n - 118],
-          aim: attackCenter,
-        };
+        attackCenter = this.stickCenter || (this.stickCenter = [0, 0]),
+        anchors = this.stickAnchors || (this.stickAnchors = { move: [0, 0], aim: [0, 0] });
+      if (attackBounds && Number.isFinite(attackBounds.left) && Number.isFinite(attackBounds.top) && Number.isFinite(attackBounds.width) && Number.isFinite(attackBounds.height)) {
+        attackCenter[0] = attackBounds.left + attackBounds.width / 2;
+        attackCenter[1] = attackBounds.top + attackBounds.height / 2;
+      } else {
+        attackCenter[0] = this.game.leftHanded ? 80 : t - 80;
+        attackCenter[1] = n - 80;
+      }
+      anchors.move[0] = this.game.leftHanded ? t - Math.max(96, t * 0.14) : Math.max(96, t * 0.14);
+      anchors.move[1] = n - 118;
+      anchors.aim = attackCenter;
       document.body.classList.toggle(`aiming`, e.aim.id !== null);
-      for (let t of [`move`, `aim`]) {
+      for (const t of this.stickKeys) {
         let n = e[t],
           i = this.stickEls[t];
         if (!i) continue;
         let a = n.id !== null,
-          o = a ? n.ox : r[t][0],
-          s = a ? n.oy : r[t][1];
+          o = a ? n.ox : anchors[t][0],
+          s = a ? n.oy : anchors[t][1];
         ((i.style.transform = `translate3d(${o.toFixed(1)}px, ${s.toFixed(1)}px, 0)`),
           i.classList.toggle(`on`, a),
           (i.firstElementChild.style.transform = `translate(${(n.x * 58).toFixed(1)}px, ${(n.y * 58).toFixed(1)}px)`));
@@ -871,7 +911,7 @@ var  Ru = 9,
         }),
         this.selectArena(e.arenaName),
         ($(`mode-badge`).textContent = e.mode.label.toUpperCase()),
-        ($(`renderer-info`).textContent = `Renderer aktif: ${e.pipeline.isWebGPU ? `WebGPU (eksperimental)` : `WebGL2`}`),
+        ($(`renderer-info`).textContent = `Renderer aktif: ${e.pipeline.isWebGPU ? `WebGPU` : window.__GBH_RENDERER__?.fallback === false ? `WebGL2 (manual)` : `WebGL2 (fallback)`}`),
         ($(`auto-time`).checked = e.autoTime),
         ($(`tog-ao`).checked = e.pipeline.toggles.ao),
         ($(`tog-ao`).disabled = e.pipeline.isWebGPU || !e.pipeline.quality.ao),
@@ -1021,7 +1061,7 @@ var  Ru = 9,
     }
     update(e) {
       let t = this.game,
-        n = {};
+        n = this.projectScratch || (this.projectScratch = {});
       for (let e of t.brawlers) {
         let t = this.overheads.get(e.id);
         if (!t) continue;
@@ -1153,11 +1193,16 @@ var  Ru = 9,
         const button = $(`skill-action-${index + 1}`);
         const definition = skills[index];
         const remaining = Math.max(0, cooldowns[index] || 0);
-        const locked = !player?.alive || this.game.state !== `playing` || this.game.paused || (player.spawnT || 0) > 0 || (player.hardCCT || 0) > 0 || !!player.burst;
+        const kunaiRecastRemaining = player?.kunaiRecastRemaining ?? Math.max(0, (player?.kunaiRecastUntil || 0) - this.game.matchTime);
+        const recastTarget = player?.kunaiRecastTarget;
+        const recastTargetReady = recastTarget ? recastTarget.alive && !recastTarget.airborne : !!player?.kunaiRecastTargetId;
+        const kunaiRecastReady = player?.def?.id === `naka` && index === 1 && recastTargetReady && kunaiRecastRemaining > 0;
         const activeCharge = index === 1 && chargeSkill;
-        const ready = !!definition && remaining <= 0 && !locked && !activeCharge;
+        const actionLocked = !player?.alive || this.game.state !== `playing` || this.game.paused || (player.spawnT || 0) > 0 || (player.hardCCT || 0) > 0 || !!player.burst || !!player.dash || !!player.flicker || !!player.networkDash || !!player.networkFlicker || !!player.airborne || !!player.networkCharging || (player.burstT || 0) > 0 || (player.networkLeapT || 0) > 0;
+        const locked = actionLocked || (index !== 1 && !!player?.skill2Charge);
+        const ready = !!definition && (remaining <= 0 || kunaiRecastReady) && !locked && !activeCharge;
         let label = definition?.shortName || `SKILL ${index + 1}`;
-        let stateLabel = `READY`;
+        let stateLabel = kunaiRecastReady ? `RECAST` : `READY`;
         if (activeCharge) {
           const elapsed = Number.isFinite(player.skill2ChargeT)
             ? player.skill2ChargeT
@@ -1165,13 +1210,15 @@ var  Ru = 9,
               ? Math.max(0, this.game.matchTime - player.skill2Charge.startedAt)
               : 0;
           stateLabel = `${Math.min(100, Math.round(elapsed / Math.max(0.1, definition.chargeTime || 1) * 100))}%`;
-        } else if (remaining > 0) stateLabel = `${remaining.toFixed(1)}s`;
-        else if (locked) stateLabel = `WAIT`;
-        button.disabled = !definition || locked || (remaining > 0 && !activeCharge);
+        } else if (locked) stateLabel = `WAIT`;
+        else if (kunaiRecastReady) stateLabel = `RECAST`;
+        else if (remaining > 0) stateLabel = `${remaining.toFixed(1)}s`;
+        button.disabled = !definition || locked || (remaining > 0 && !activeCharge && !kunaiRecastReady);
         button.classList.toggle(`ready`, ready);
+        button.classList.toggle(`recast`, kunaiRecastReady && !locked);
         button.classList.toggle(`charging`, activeCharge);
-        button.classList.toggle(`cooldown`, !!definition && remaining > 0 && !activeCharge);
-        button.classList.toggle(`waiting`, !!definition && locked && remaining <= 0 && !activeCharge);
+        button.classList.toggle(`cooldown`, !!definition && remaining > 0 && !activeCharge && !locked);
+        button.classList.toggle(`waiting`, !!definition && locked && !activeCharge);
         button.dataset.character = player?.def?.id || ``;
         button.dataset.skill = String(index + 1);
         button.querySelector(`i`).textContent = player?.def?.id === `gojo`
@@ -1185,7 +1232,7 @@ var  Ru = 9,
           : `0`);
         button.querySelector(`b`).textContent = label;
         button.querySelector(`.skill-state`).textContent = activeCharge ? `CHARGE ${stateLabel}` : stateLabel;
-        const description = definition ? `${definition.name}. ${activeCharge ? `Charging ${stateLabel}` : remaining > 0 ? `Ready in ${remaining.toFixed(1)} seconds` : locked ? `Waiting for the current action to finish` : `Ready`}` : `Unavailable`;
+        const description = definition ? `${definition.name}. ${activeCharge ? `Charging ${stateLabel}` : locked ? `Waiting for the current action to finish` : kunaiRecastReady ? `Recast available for ${kunaiRecastRemaining.toFixed(1)} seconds` : remaining > 0 ? `Ready in ${remaining.toFixed(1)} seconds` : `Ready`}` : `Unavailable`;
         button.setAttribute(`aria-label`, `Skill ${index + 1}: ${description}`);
         button.title = description;
       }

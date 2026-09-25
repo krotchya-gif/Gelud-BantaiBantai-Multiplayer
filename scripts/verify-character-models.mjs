@@ -31,6 +31,9 @@ context.window.claude = { hot: { ready() {} } };
 load('main');
 load('combat');
 const characterIds = Object.keys(context.Bc);
+for (const id of characterIds) {
+  assert.deepEqual(JSON.parse(JSON.stringify(context.Bc[id].skills)), CHARACTER_DEFS[id].skills, `${id}: solo and multiplayer skills match`);
+}
 for (const id of ['gojo', 'sukuna']) {
   const solo = context.Bc[id];
   const shared = CHARACTER_DEFS[id];
@@ -50,6 +53,182 @@ assert.deepEqual(Array.from(context.Bc.gojo.skills, skill => skill.name), [
 assert.deepEqual(Array.from(context.Bc.sukuna.skills, skill => skill.name), [
   'Dismantle', 'Fuga - Kamino / Flame Arrow',
 ], 'Sukuna keeps the requested skill names');
+
+let verifiedSoloSkillCount = 0;
+function makeSoloSkillHarness(characterId, targetZ = 4) {
+  const effectCalls = [];
+  const effects = new Proxy({}, { get: (_target, name) => (..._args) => effectCalls.push(String(name)) });
+  const game = {
+    scene: new context.vt(),
+    elapsed: 1,
+    matchTime: 1,
+    state: 'playing',
+    effects,
+    audio: { play() {} },
+    hud: { floatText() {}, toast() {} },
+    world: {
+      raycast() { return null; },
+      hasLineOfSight() { return true; },
+      resolveCircle(point) { return point; },
+      surfaceAt() { return null; },
+      toTile() { return 0; },
+      center() { return 0; },
+      destroyTile() { return null; },
+    },
+    brawlers: [],
+  };
+  const geometry = () => new context.fr(0.4, 0.1, 0.4);
+  const material = color => new context.Nr({ color, transparent: true, opacity: 0.6 });
+  const combat = Object.create(context.Su.prototype);
+  Object.assign(combat, {
+    game,
+    characterAreas: [],
+    characterTraps: [],
+    characterProjectiles: [],
+    arrowShowers: [],
+    arrowShowerDiscGeometry: geometry(),
+    arrowShowerRingGeometry: geometry(),
+    arrowShowerDiscMaterial: material(0xffd17a),
+    arrowShowerRingMaterial: material(0xffe5a5),
+    characterAreaOrbGeometry: geometry(),
+    trapDiscGeometry: geometry(),
+    trapRingGeometry: geometry(),
+    trapSpikeGeometry: geometry(),
+    caltropDiscMaterial: material(0x8c784d),
+    caltropRingMaterial: material(0xd1bd87),
+    shrineMaterials: {
+      wood: material(0x4b2028), red: material(0x9b2937),
+      roof: material(0x201b29), gold: material(0xc29346), trap: material(0xb9a77c),
+    },
+  });
+  game.combat = combat;
+
+  const owner = new context.fu(game, context.Bc[characterId], {
+    x: 0, z: 0, isPlayer: true, name: `Solo ${characterId}`,
+  });
+  owner.id = `solo-${characterId}`;
+  owner.alive = true;
+  owner.spawnT = 0;
+  owner.hardCCT = 0;
+  owner.cubes = 0;
+  owner.canAct = () => true;
+  const target = {
+    id: 'solo-skill-target', x: 0, z: targetZ, facing: 0, alive: true, airborne: false,
+    hp: 10000, maxHp: 10000, hardCCT: 0, lastDamageBlocked: false,
+    root: { position: new context.H(0, 0, targetZ) },
+    knock: { set() {} }, slowEffects: new Map(), bleeds: new Map(), burns: new Map(),
+    takeDamage(amount) {
+      const dealt = Math.min(this.hp, amount);
+      this.hp -= dealt;
+      this.lastDamageBlocked = false;
+      if (this.hp <= 0) this.alive = false;
+      return dealt;
+    },
+    applyHardCC(duration) { this.hardCCT = Math.max(this.hardCCT, duration); },
+    applyStatusDoT(kind, source, damage, duration) {
+      (kind === 'burn' ? this.burns : this.bleeds).set(source.id, { damage, duration });
+    },
+  };
+  game.brawlers = [owner, target];
+  return { game, combat, owner, target, effectCalls };
+}
+
+function invokeSoloSkill(characterId, skillNumber, targetZ = 4) {
+  const harness = makeSoloSkillHarness(characterId, targetZ);
+  const definition = context.Bc[characterId].skills[skillNumber - 1];
+  assert.equal(harness.owner.useSkill(skillNumber, 'activate', 0, 1, 0, targetZ), true, `${characterId} skill ${skillNumber} activates in solo`);
+  assert.equal(harness.owner.skillCooldowns[skillNumber - 1], definition.cooldown, `${characterId} skill ${skillNumber} starts its solo cooldown`);
+  verifiedSoloSkillCount += 1;
+  return harness;
+}
+
+const soloSlide = invokeSoloSkill('dusty', 1);
+assert.equal(soloSlide.owner.dash.attack.skillId, 'combat-slide');
+assert.equal(soloSlide.owner.damageReduction, 0.25);
+const soloShell = invokeSoloSkill('dusty', 2, 3);
+assert.equal(soloShell.target.hp, soloShell.target.maxHp - 450);
+
+const soloBolt = invokeSoloSkill('ace', 1);
+assert.equal(soloBolt.combat.characterProjectiles[0].pierceCoverRemaining, 1);
+assert.equal(soloBolt.combat.characterProjectiles[0].damage, 480);
+const soloRoll = invokeSoloSkill('ace', 2);
+assert.equal(soloRoll.owner.dash.attack.skillId, 'tactical-roll');
+
+const soloSticky = invokeSoloSkill('fuse', 1);
+assert.equal(soloSticky.combat.characterProjectiles[0].stickyFuse, 2);
+assert.equal(soloSticky.combat.characterProjectiles[0].attachToTarget, true);
+const soloSmoke = invokeSoloSkill('fuse', 2);
+assert.equal(soloSmoke.combat.characterAreas[0].kind, 'smoke-screen');
+assert.equal(soloSmoke.combat.characterAreas[0].attack.duration, 3.5);
+
+const soloCharge = invokeSoloSkill('titan', 1);
+assert.equal(soloCharge.owner.dash.attack.skillId, 'iron-charge');
+const soloTaunt = invokeSoloSkill('titan', 2);
+assert.equal(soloTaunt.owner.tauntEchoT, 1.75);
+assert.equal(soloTaunt.owner.damageReduction, 0.3);
+
+const soloChain = invokeSoloSkill('volt', 1);
+assert.equal(soloChain.target.hp, soloChain.target.maxHp - 350);
+const soloOvercharge = invokeSoloSkill('volt', 2);
+assert.equal(soloOvercharge.owner.overchargeT, 3);
+
+const soloSmokeBomb = invokeSoloSkill('naka', 1);
+assert.equal(soloSmokeBomb.owner.stealthT, 2);
+const soloKunai = invokeSoloSkill('naka', 2);
+assert.equal(soloKunai.combat.characterProjectiles[0].skillId, 'kunai-dash');
+soloKunai.owner.kunaiRecastTarget = soloKunai.target;
+soloKunai.owner.kunaiRecastUntil = soloKunai.game.matchTime + 2;
+assert.equal(soloKunai.owner.useSkill(2, 'activate', 0, 1, 0, 4), true, 'solo Kunai can be recast after a hit');
+assert.equal(soloKunai.owner.dash.attack.skillId, 'kunai-recast');
+
+const soloParrySkill = invokeSoloSkill('ello', 1);
+assert.equal(soloParrySkill.owner.takeDamage(500, soloParrySkill.target, false, { kind: 'melee' }), 0);
+assert.equal(soloParrySkill.owner.parryEmpowerT, 2);
+const soloFlash = invokeSoloSkill('ello', 2);
+assert.equal(soloFlash.owner.dash.attack.skillId, 'swift-flash');
+assert.ok(soloFlash.owner.ccImmuneT > 0);
+
+const soloEagle = invokeSoloSkill('syafiah', 1);
+assert.equal(soloEagle.owner.pierceCoverShots, 1);
+const soloCaltrops = invokeSoloSkill('syafiah', 2);
+assert.equal(soloCaltrops.combat.characterTraps.length, 1);
+assert.equal(soloCaltrops.owner.dash.attack.skillId, 'caltrops-trap');
+
+const soloBlue = invokeSoloSkill('gojo', 1);
+assert.equal(soloBlue.combat.characterAreas[0].kind, 'gojo-pull');
+assert.equal(soloBlue.combat.characterAreas[0].activeRemaining, 2.4);
+assert.ok(soloBlue.combat.characterAreas[0].orb, 'solo Blue creates its orb visual');
+const soloRed = invokeSoloSkill('gojo', 2);
+assert.equal(soloRed.target.hp, soloRed.target.maxHp - 700);
+
+const soloDismantle = invokeSoloSkill('sukuna', 1);
+assert.equal(soloDismantle.target.hp, soloDismantle.target.maxHp - 600);
+const soloFuga = makeSoloSkillHarness('sukuna');
+assert.equal(soloFuga.owner.useSkill(2, 'start', 0, 1, 0, 4), true);
+soloFuga.game.matchTime += 1.1;
+assert.equal(soloFuga.owner.useSkill(2, 'release', 0, 1, 0, 4), true);
+assert.equal(soloFuga.combat.characterProjectiles[0].damage, 1100);
+assert.equal(soloFuga.combat.characterProjectiles[0].range, 13.5);
+verifiedSoloSkillCount += 1;
+assert.equal(verifiedSoloSkillCount, 20, 'the verifier exercises both active-skill paths for all ten characters in solo');
+
+const soloBarrier = makeSoloSkillHarness('gojo');
+soloBarrier.owner.gojoBarrier = true;
+assert.equal(soloBarrier.owner.takeDamage(500, soloBarrier.target, false, { kind: 'melee' }), 0);
+assert.equal(soloBarrier.owner.gojoBarrier, false);
+assert.equal(soloBarrier.owner.gojoBarrierReadyAt, soloBarrier.game.matchTime + 5);
+
+for (const [characterId, expectedKind] of [['gojo', 'gojo-domain'], ['sukuna', 'sukuna-zone']]) {
+  const soloSuper = makeSoloSkillHarness(characterId);
+  soloSuper.owner.superCharge = 1;
+  assert.equal(soloSuper.owner.useSuper(0, 1, 0, 4), true, `${characterId} Super activates in solo`);
+  const area = soloSuper.combat.characterAreas[0];
+  assert.equal(area.kind, expectedKind);
+  assert.equal(area.attack.duration, 4);
+  if (characterId === 'gojo') assert.equal(soloSuper.effectCalls.filter(name => name === 'spark').length, 10, 'solo Gojo Super emits its particle ring');
+  else assert.equal(area.shrine?.name, 'malevolent-shrine', 'solo Sukuna Super builds the shrine visual');
+}
+
 const botRoster = Array.from(context.createBalancedBotRoster(characterIds, 15, 0x13579bdf));
 assert.equal(botRoster.length, 15, 'solo Deathmatch roster fills all bot slots');
 assert.deepEqual(Array.from(context.createBalancedBotRoster(characterIds, 15, 0x13579bdf)), botRoster, 'same seed keeps bot roster deterministic');
@@ -155,26 +334,48 @@ for (let frame = 0; frame < 15; frame++) qualityGame.adaptQuality(0.2);
 assert.deepEqual(qualityChanges, ['high'], 'manual Ultra recovers from sustained 5 FPS');
 assert.ok(context.Uc.high.shadowMap < 4096 && context.Uc.ultra.lampMap < 2048, 'High/Ultra cap expensive shadow targets');
 const webGpuShadowWrites = [];
+const webGpuPoolLightCounts = [];
 const webGpuQuality = {
   pipeline: { isWebGPU: true, usingPCSS: false },
   mapSize: 2048,
-  key: { shadow: { mapSize: { x: 2048, set(x, y) { webGpuShadowWrites.push(['sun', x, y]); this.x = x; } }, radius: 0 } },
+  key: { castShadow: true, shadow: { mapSize: { x: 2048, set(x, y) { webGpuShadowWrites.push(['sun', x, y]); this.x = x; } }, radius: 0 } },
   lampShadowSlots: 4,
   lampSlots: Array.from({ length: 8 }, () => ({
     castShadow: true,
     shadow: { mapSize: { x: 1024, set(x, y) { webGpuShadowWrites.push(['lamp', x, y]); this.x = x; } }, radius: 0 },
   })),
-  setPoolSize() {},
+  setPoolSize(count) { webGpuPoolLightCounts.push(count); },
   invalidateShadowMap() {},
   updateShadowParams() {},
 };
 context.kl.prototype.applyQuality.call(webGpuQuality, context.Uc.low);
 assert.equal(webGpuQuality.mapSize, 2048, 'WebGPU uses a stable 2K sun shadow target at startup');
 assert.deepEqual(webGpuShadowWrites, [], 'WebGPU initializes its sun shadow target before the first frame');
-context.kl.prototype.applyQuality.call(webGpuQuality, context.Uc.ultra);
-assert.deepEqual(webGpuShadowWrites, [], 'switching WebGPU quality never resizes in-flight shadow textures');
+assert.equal(webGpuQuality.key.castShadow, false, 'WebGPU keeps directional shadows disabled across quality tiers');
+assert.ok(webGpuQuality.lampSlots.every(light => light.castShadow === false), 'WebGPU keeps lamp shadows disabled across quality tiers');
+for (const quality of ['medium', 'high', 'ultra']) context.kl.prototype.applyQuality.call(webGpuQuality, context.Uc[quality]);
+assert.deepEqual(webGpuShadowWrites, [], 'switching WebGPU quality never resizes shadow textures');
+assert.deepEqual(webGpuPoolLightCounts, [4, 4, 4, 4], 'WebGPU keeps a fixed four-light pool across quality tiers');
 assert.equal(webGpuQuality.lampSlots[0].shadow.mapSize.x, 1024, 'WebGPU lamp shadow targets stay at 1K');
-assert.equal(webGpuQuality.lampSlots[0].castShadow, true, 'Ultra keeps WebGPU lamp shadows enabled');
+assert.equal(webGpuQuality.lampSlots[0].castShadow, false, 'Ultra does not re-enable WebGPU lamp shadows');
+
+const adaptiveScaleChanges = [];
+const adaptiveScaleGame = Object.create(context.ld.prototype);
+Object.assign(adaptiveScaleGame, {
+  state: 'playing', paused: false, userPickedQuality: true,
+  perf: { t: 0, frames: 0 }, pipeline: {
+    isWebGPU: true, qualityName: 'low', performanceScale: 1,
+    setPerformanceScale(scale) { adaptiveScaleChanges.push(scale); this.performanceScale = scale; return true; },
+  },
+  hud: { toast() {} },
+  setQuality() { throw new Error('Low is the final quality tier'); },
+});
+for (let frame = 0; frame < 178; frame++) adaptiveScaleGame.adaptQuality(1 / 59);
+assert.deepEqual(adaptiveScaleChanges, [0.9], 'WebGPU lowers render resolution at sustained 59 FPS');
+adaptiveScaleGame.perf = { t: 0, frames: 0 };
+adaptiveScaleGame.pipeline.performanceScale = 0.9;
+for (let frame = 0; frame < 271; frame++) adaptiveScaleGame.adaptQuality(1 / 90);
+assert.deepEqual(adaptiveScaleChanges, [0.9, 0.95], 'WebGPU restores render resolution gradually after sustained headroom');
 
 // The actual WebGL composer must keep GTAO at half buffer resolution after
 // creation and resize; a constructor-only size check misses composer resizes.
@@ -209,6 +410,11 @@ assert.equal(qualityPipeline.gtao.width, 750, 'Ultra GTAO stays at half resoluti
 assert.equal(qualityPipeline.gtao.height, 525, 'Ultra GTAO height stays at half resolution after resize');
 qualityPipeline.setQuality('medium');
 assert.equal(pipelineBuilds, 1, 'changing AO or MSAA configuration rebuilds the required passes');
+const fullPixelRatio = qualityPipeline.getPixelRatio(1000, 700);
+qualityPipeline.setPerformanceScale(0.8);
+assert.equal(qualityPipeline.performanceScale, 0.8, 'manual render scale is clamped and stored');
+assert.ok(qualityPipeline.getPixelRatio(1000, 700) < fullPixelRatio, 'adaptive render scale reduces drawing resolution');
+qualityPipeline.setPerformanceScale(1);
 context.window.__GBH_RENDERER__ = undefined;
 
 // Multiplayer effects are cosmetic: a server leap first animates in the air,
@@ -290,9 +496,20 @@ networkVisualGame.syncNetworkItems([{ id: 'heal-1', kind: 'heal', x: 2, z: 3 }])
 assert.equal(lightRequests.length, 3, 'multiplayer item requests a pooled light');
 networkVisualGame.syncNetworkAreas([{ id: 'zone-1', kind: 'arrow-shower', x: 0, z: 0, radius: 3.4 }]);
 assert.equal(networkVisualGame.networkAreaMarkers.size, 1, 'arrow shower uses a persistent solo-style marker');
+networkVisualGame.combat.createShrineVisual = () => {
+  const model = new context.ut();
+  model.name = 'malevolent-shrine';
+  model.userData.sharedShrineMaterial = true;
+  return model;
+};
 networkVisualGame.syncNetworkAreas([
   { id: 'zone-1', kind: 'arrow-shower', x: 0, z: 0, radius: 3.4 },
-  { id: 'gojo-blue', kind: 'gojo-pull', x: 1, z: 2, radius: 2.4, remaining: 1.4, color: 0x416cff },
+  { id: 'shrine-1', kind: 'sukuna-zone', x: 0, z: 0, radius: 4.5, warning: 0.45 },
+]);
+assert.equal(networkVisualGame.networkAreaMarkers.get('shrine-1').userData.shrine.name, 'malevolent-shrine', 'multiplayer Sukuna Super attaches the shrine model');
+networkVisualGame.syncNetworkAreas([
+  { id: 'zone-1', kind: 'arrow-shower', x: 0, z: 0, radius: 3.4 },
+  { id: 'gojo-blue', kind: 'gojo-pull', x: 1, z: 2, radius: 2.4, remaining: 2.4, color: 0x416cff },
 ]);
 const gojoBlueMarker = networkVisualGame.networkAreaMarkers.get('gojo-blue');
 assert.equal(gojoBlueMarker.userData.areaOrb.geometry, networkVisualGame.combat.characterAreaOrbGeometry, 'multiplayer Gojo Blue renders its shared orb geometry');
@@ -300,7 +517,7 @@ networkVisualGame.syncNetworkAreas([
   { id: 'zone-1', kind: 'arrow-shower', x: 0, z: 0, radius: 3.4 },
   { id: 'gojo-blue', kind: 'gojo-pull', x: 1, z: 2, radius: 2.4, remaining: 0.11, color: 0x416cff },
 ]);
-assert.ok(gojoBlueMarker.userData.areaOrb.material.opacity < 0.6, 'multiplayer Gojo Blue orb fades near the 1.4-second expiry');
+assert.ok(gojoBlueMarker.userData.areaOrb.material.opacity < 0.6, 'multiplayer Gojo Blue orb fades near the 2.4-second expiry');
 networkVisualGame.spawnNetworkArrowFalls(0, 0, 3.4);
 networkVisualGame.updateNetworkArrowFalls(0.1);
 assert.ok(arrowInstances.count > 0, 'arrow shower fills the shared instanced arrow mesh');
@@ -321,7 +538,7 @@ const soloBlueArea = {
   owner: soloBlueOwner, kind: 'gojo-pull', x: 0, z: 2, attack: context.Bc.gojo.skills[0],
   marker: { scale: { setScalar() {} }, removeFromParent() { soloBlueMarkerRemoved = true; } },
   disc: { material: {} }, ring: { material: {} }, orb: null,
-  remaining: 1.4, warningRemaining: 0, activeRemaining: 1.4, activated: true,
+  remaining: 2.4, warningRemaining: 0, activeRemaining: 2.4, activated: true,
   nextWave: 0, waves: 0, hitTargets: new Set(), blockedTargets: new Set(), slowKey: 'gojo:solo-blue',
 };
 const soloAreaCombat = Object.create(context.Su.prototype);
@@ -333,12 +550,78 @@ Object.assign(soloAreaCombat, {
     audio: { play() {} }, effects: {},
   },
 });
-for (let frame = 0; frame < 41; frame += 1) soloAreaCombat.updateCharacterAreas(1 / 30);
-assert.equal(soloAreaCombat.characterAreas.length, 1, 'solo Gojo Blue stays active until its 1.4-second limit');
+for (let frame = 0; frame < 71; frame += 1) soloAreaCombat.updateCharacterAreas(1 / 30);
+assert.equal(soloAreaCombat.characterAreas.length, 1, 'solo Gojo Blue stays active until its 2.4-second limit');
 soloAreaCombat.updateCharacterAreas(1 / 30);
-assert.equal(soloAreaCombat.characterAreas.length, 0, 'solo Gojo Blue expires at the 1.4-second limit');
+assert.equal(soloAreaCombat.characterAreas.length, 0, 'solo Gojo Blue expires at the 2.4-second limit');
 assert.equal(soloBlueMarkerRemoved, true, 'solo Gojo Blue removes its marker at expiry');
 assert.equal(soloBlueTarget.slowEffects.has(soloBlueArea.slowKey), false, 'solo Gojo Blue clears its slow at expiry');
+
+const soloParry = Object.create(context.fu.prototype);
+Object.assign(soloParry, {
+  alive: true, spawnT: 0, flickerInvulnT: 0, hardCCT: 0,
+  def: context.Bc.ello, id: 'solo-ello', root: { position: { x: 0, z: 0 } }, facing: 0,
+  skillParryT: 0.55, skillParryFacing: 0, parryEmpowerT: 0, iaidoEmpowered: false,
+  superColor: new context.J(0xffdc75),
+  game: { effects: { impact() {} }, audio: { play() {} } },
+});
+assert.equal(soloParry.takeDamage(500, { x: 0, z: 2 }, false, { kind: 'melee' }), 0, 'solo Ello parries a frontal hit');
+assert.equal(soloParry.lastDamageBlocked, true, 'solo parry marks the hit as blocked');
+assert.equal(soloParry.parryEmpowerT, 2, 'solo parry empowers Iaido');
+
+let soloPiercingAttack;
+const soloArcher = Object.create(context.fu.prototype);
+Object.assign(soloArcher, {
+  alive: true, hardCCT: 0, skill2Charge: null, leap: null, networkLeapT: 0,
+  dash: null, flicker: null, def: context.Bc.syafiah, fireCooldown: 0,
+  burst: null, pierceCoverShots: 1, attackSerial: 0, aimAngle: 0, revealT: 0,
+  root: { position: { x: 0, z: 0 } },
+  game: { state: 'playing', elapsed: 1, world: { surfaceAt: () => null }, audio: { play() {} } },
+  startVolley(attack) { soloPiercingAttack = attack; },
+});
+assert.equal(soloArcher.attack(0, 1, 0, 0, 0.7), true, 'solo charged Eagle Eye arrow fires');
+assert.equal(soloPiercingAttack.pierceCover, true, 'solo Eagle Eye shot pierces cover');
+assert.equal(soloPiercingAttack.pierceCoverCount, 1, 'solo Eagle Eye shot pierces one cover');
+assert.equal(soloArcher.pierceCoverShots, 0, 'solo Eagle Eye charge is consumed once');
+
+const shrineMaterials = {
+  wood: new context.Nr({ color: 0x4b2028 }),
+  red: new context.Nr({ color: 0x9b2937 }),
+  roof: new context.Nr({ color: 0x201b29 }),
+  gold: new context.Nr({ color: 0xc29346 }),
+};
+const shrineHarness = Object.create(context.Su.prototype);
+shrineHarness.shrineMaterials = shrineMaterials;
+const shrine = shrineHarness.createShrineVisual();
+assert.equal(shrine.name, 'malevolent-shrine', 'Sukuna Super builds a named shrine model');
+assert.equal(shrine.children.length, 4, 'Sukuna shrine uses four merged static meshes');
+assert.ok(shrine.children.every(mesh => mesh.userData.sharedShrineMaterial && !mesh.castShadow && !mesh.receiveShadow), 'Sukuna shrine meshes reuse static materials without dynamic shadows');
+shrineMaterials.wood.dispose(); shrineMaterials.red.dispose(); shrineMaterials.roof.dispose(); shrineMaterials.gold.dispose();
+
+const gojoVfxCalls = [];
+const gojoVfxHarness = {
+  game: { effects: {
+    flash() { gojoVfxCalls.push('flash'); }, burst() { gojoVfxCalls.push('burst'); },
+    ring() { gojoVfxCalls.push('ring'); }, electricImpact() { gojoVfxCalls.push('electricImpact'); },
+    spark() { gojoVfxCalls.push('spark'); },
+  } },
+};
+context.Su.prototype.playGojoSuperVfx.call(gojoVfxHarness, { x: 0, z: 0 }, 1, 2);
+assert.deepEqual(gojoVfxCalls, ['flash', 'burst', 'ring', 'electricImpact', ...Array(10).fill('spark')], 'Gojo Super plays its complete particle cast effect');
+
+const networkSuperCalls = [];
+const networkSuperEntities = new Map(['gojo', 'sukuna'].map(id => [id, {
+  def: context.Bc[id], x: 0, z: 0, superColor: new context.J(context.Bc[id].super.color),
+  startSkillAnimation(skill, duration) { networkSuperCalls.push([id, skill, duration]); },
+}]));
+const networkSuperHarness = Object.assign(Object.create(context.ld.prototype), {
+  networkEntities: networkSuperEntities,
+  combat: { playGojoSuperVfx() { networkSuperCalls.push(['gojo-particles']); } },
+  effects: { burst() {} }, audio: { play() {} },
+});
+networkSuperHarness.handleNetworkEvent({ type: 'SUPER_USED', ownerId: 'gojo', kind: 'gojo-domain', targetX: 2, targetZ: 3 });
+networkSuperHarness.handleNetworkEvent({ type: 'SUPER_USED', ownerId: 'sukuna', kind: 'sukuna-zone', targetX: 2, targetZ: 3 });
+assert.deepEqual(networkSuperCalls, [['gojo', 3, 4], ['gojo-particles'], ['sukuna', 3, 0.9]], 'multiplayer Gojo and Sukuna Super events trigger their cast poses and Gojo particles');
 
 const sizes = {};
 const designDefinitions = Object.values(context.GBH_CHARACTER_DESIGNS).map(def => ({ ...context.Bc.titan, ...def }));
@@ -425,6 +708,16 @@ for (const def of [...Object.values(context.Bc), ...designDefinitions]) {
       game.elapsed += 1 / 60;
       brawler.animate(1 / 60, true);
     }
+    if (def.id === 'gojo' || def.id === 'sukuna') {
+      brawler.recoil = 0;
+      brawler.punch = [0, 0];
+      const restingArms = brawler.model.arms.map(arm => ({ x: arm.rotation.x, z: arm.rotation.z }));
+      brawler.startSkillAnimation(3, 4);
+      for (let frame = 0; frame < 8; frame += 1) brawler.animate(1 / 60, true);
+      assert.ok(brawler.model.arms.some((arm, index) =>
+        Math.abs(arm.rotation.x - restingArms[index].x) > 0.04 || Math.abs(arm.rotation.z - restingArms[index].z) > 0.04,
+      ), `${def.id}: Super has a distinct cast pose`);
+    }
     brawler.root.updateMatrixWorld(true);
     brawler.root.traverse(part => assert.ok(part.matrixWorld.elements.every(Number.isFinite), `${def.id}: animated transforms`));
     assert.ok(brawler.model.flashMats.every(material => material.emissive.r > 0), 'damage flash works');
@@ -444,4 +737,4 @@ for (const id of ['dusty', 'fuse', 'volt']) {
     assert.deepEqual(after, before, `${id}: ${slot} gameplay preserved`);
   }
 }
-console.log('PASS: ten gameplay rigs + two design rigs, bot roster, solo items/Flicker/traps, multiplayer visual lifecycle, quality fallback, material ownership, silhouettes, and combat tuning.');
+console.log('PASS: ten gameplay rigs + two design rigs, all 20 solo active-skill paths, solo domains/barrier/parry/Eagle Eye, Gojo/Sukuna Super visuals, bot roster, items/Flicker/traps, multiplayer visual lifecycle, quality fallback, material ownership, silhouettes, and combat tuning.');

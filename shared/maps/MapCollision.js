@@ -110,6 +110,39 @@ export class MapCollision {
     return false;
   }
 
+  projectileBlocker(ax, az, bx, bz, radius = 0, ignoredCover = null) {
+    if (!this.layout) return this.blocksSegment(ax, az, bx, bz, radius) ? { kind: 'solid' } : null;
+    const distance = Math.hypot(bx - ax, bz - az);
+    const steps = Math.max(1, Math.ceil(distance / 0.12));
+    const { size, origin, cellsData, cells } = this.layout;
+    const neighborReach = Math.max(1, Math.ceil(radius));
+    for (let index = 1; index <= steps; index += 1) {
+      const progress = index / steps;
+      const x = ax + (bx - ax) * progress;
+      const z = az + (bz - az) * progress;
+      if (x < this.bounds.minX + radius || x > this.bounds.maxX - radius || z < this.bounds.minZ + radius || z > this.bounds.maxZ - radius) return { kind: 'solid' };
+      const centerX = Math.floor(x - origin.x);
+      const centerZ = Math.floor(z - origin.z);
+      const nearby = [];
+      for (let tileZ = centerZ - neighborReach; tileZ <= centerZ + neighborReach; tileZ += 1) {
+        for (let tileX = centerX - neighborReach; tileX <= centerX + neighborReach; tileX += 1) {
+          if (tileX < 0 || tileZ < 0 || tileX >= size || tileZ >= size) continue;
+          const cell = cellsData[tileZ * size + tileX];
+          if (cell?.kind !== cells.WALL && cell?.kind !== cells.WATER) continue;
+          const closestX = clamp(x, origin.x + tileX, origin.x + tileX + 1);
+          const closestZ = clamp(z, origin.z + tileZ, origin.z + tileZ + 1);
+          if (Math.hypot(x - closestX, z - closestZ) > radius) continue;
+          const sameIgnoredTile = ignoredCover?.x === tileX && ignoredCover?.z === tileZ;
+          if (sameIgnoredTile) continue;
+          const isCover = cell.kind === cells.WALL && cell.style !== 'rock' && cell.style !== 'lamp' && !cell.meta?.indestructible;
+          nearby.push({ kind: isCover ? 'cover' : 'solid', tileX, tileZ });
+        }
+      }
+      if (nearby.length) return nearby[0];
+    }
+    return null;
+  }
+
   resolveCircle(x, z, radius = 0.45) {
     let nextX = clamp(x, this.bounds.minX + radius, this.bounds.maxX - radius);
     let nextZ = clamp(z, this.bounds.minZ + radius, this.bounds.maxZ - radius);

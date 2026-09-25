@@ -67,6 +67,7 @@ function createBalancedBotRoster(characterIds, count, seed = 0) {
     stats: { durability: 2, agility: 5, damage: 3, range: 3 },
     passive: passives.naka,
     terrainAffinity: { type: 'bush', moveMultiplier: 1.08 },
+    skills: [{ id: 'smoke-bomb', name: 'Smoke Bomb', shortName: 'SMOKE', cooldown: 14, duration: 2, color: 0x59645f }, { id: 'kunai-dash', name: 'Kunai Dash', shortName: 'KUNAI', cooldown: 10, range: 6, damage: 280, speed: 24, recastWindow: 2, dashOffset: 0.85, color: 0xd9e1dc }],
     attack: {
       kind: 'spread',
       pellets: 3,
@@ -107,6 +108,7 @@ function createBalancedBotRoster(characterIds, count, seed = 0) {
     passive: passives.ello,
     terrainAffinity: { type: 'ice', tractionMultiplier: 1.2 },
     knockbackResistance: 0.65,
+    skills: [{ id: 'parry-stance', name: 'Parry Stance', shortName: 'PARRY', cooldown: 8, duration: 0.55, frontAngle: 120, empowerDuration: 2, color: 0xffdc75 }, { id: 'swift-flash', name: 'Swift Flash', shortName: 'FLASH', cooldown: 10, distance: 3.5, duration: 0.22, damage: 300, ccImmune: true, color: 0xffdc75 }],
     attack: {
       kind: 'melee',
       count: 1,
@@ -153,6 +155,7 @@ function createBalancedBotRoster(characterIds, count, seed = 0) {
     stats: { durability: 2, agility: 3, damage: 4, range: 5 },
     passive: passives.syafiah,
     terrainAffinity: { type: 'low-gravity', rangeMultiplier: 1.1 },
+    skills: [{ id: 'eagle-eye', name: 'Eagle Eye', shortName: 'EAGLE', cooldown: 14, duration: 5, zoomMultiplier: 1.2, pierceDestructibleCover: 1, color: 0xffd78a }, { id: 'caltrops-trap', name: 'Caltrops Trap', shortName: 'CALTROPS', cooldown: 11, retreatDistance: 2.2, trapDuration: 3, radius: 0.7, slow: 0.35, damagePerSecond: 80, damageDuration: 2, color: 0xd2bd83 }],
     attack: {
       kind: 'burst',
       count: 1,
@@ -187,9 +190,13 @@ function createBalancedBotRoster(characterIds, count, seed = 0) {
   Bc.ace = {
     ...Bc.ace,
     attack: { ...Bc.ace.attack, damage: 200, range: 8.2, noKnockback: true },
+    skills: [{ id: 'piercing-bolt', name: 'Piercing Bolt', shortName: 'BOLT', cooldown: 8, range: 9, damage: 480, speed: 21, defenseBreak: 0.12, defenseBreakDuration: 2.5, piercePlayers: true, pierceCover: true, color: 0x89dcff }, { id: 'tactical-roll', name: 'Tactical Roll', shortName: 'ROLL', cooldown: 9, distance: 3, duration: 0.25, restoreAmmo: 1 }],
     super: { ...Bc.ace.super, damage: 220, breaksWalls: false, noKnockback: true },
   };
-  Bc.titan = { ...Bc.titan, speed: 3.25, reload: 1.0 };
+  Bc.dusty.skills = [{ id: 'combat-slide', name: 'Combat Slide', shortName: 'SLIDE', cooldown: 8, distance: 3.5, duration: 0.25, damageReduction: 0.25, restoreAmmo: 1 }, { id: 'concussive-shell', name: 'Concussive Shell', shortName: 'SHELL', cooldown: 10, range: 4, arc: 1.1, damage: 450, knockback: 4.5, wallStun: 0.6, color: 0xffa53a }];
+  Bc.fuse.skills = [{ id: 'sticky-grenade', name: 'Sticky Grenade', shortName: 'STICKY', cooldown: 9, range: 4.5, fuse: 2, damage: 700, blast: 1.5, knockback: 2.5, speed: 10, attachToTarget: true, attachToCover: true, color: 0xff8d3d }, { id: 'smoke-screen', name: 'Smoke Screen', shortName: 'SMOKE', cooldown: 13, radius: 2.8, duration: 3.5, slow: 0.2, color: 0x828a84 }];
+  Bc.titan = { ...Bc.titan, speed: 3.25, reload: 1.0, skills: [{ id: 'iron-charge', name: 'Iron Charge', shortName: 'CHARGE', cooldown: 9, distance: 4, duration: 0.38, damage: 300, knockback: 2.2, interrupt: true, color: 0xb9bd87 }, { id: 'taunt-echo', name: 'Taunt Echo', shortName: 'TAUNT', cooldown: 12, radius: 3.5, duration: 1.75, damageReduction: 0.3, slowAway: 0.3, color: 0xc1c89a }] };
+  Bc.volt.skills = [{ id: 'chain-lightning', name: 'Chain Lightning', shortName: 'CHAIN', cooldown: 7, range: 6.5, damage: 350, jumpCount: 2, jumpRange: 2.5, jumpDamage: 250, interruptDuration: 0.17, color: 0xffdf55 }, { id: 'overcharge-volt', name: 'Overcharge Volt', shortName: 'OVERCHARGE', cooldown: 12, duration: 3, speedMultiplier: 1.15, projectileCount: 4, color: 0xffef9a }];
 
   // Reference-sheet identities. Geometry is owned by character-models.js;
   // these overrides are cosmetic and leave combat tuning intact.
@@ -218,7 +225,7 @@ function createBalancedBotRoster(characterIds, count, seed = 0) {
     blurb: 'Limitless Strike · Blue draws foes in · Red blasts them away.',
     hp: 3000, speed: 3.25, reload: 1, preferred: 3.2, maxAmmo: 0, superCharge: 3800,
     stats: { durability: 2, agility: 3, damage: 4, range: 4 },
-    passive: 'Infinity Barrier: gain one barrier after 10 seconds without taking a hit.',
+    passive: 'Infinity Barrier: gain one barrier after 5 seconds without taking a hit.',
     visual: 'sorcerer', palette: { body: 0x171b28, dark: 0x10121c, accent: 0x345bff, skin: 0xeac4b3 },
     attack: {
       kind: 'melee', name: 'Limitless Strike', count: 1, interval: 0.12, damage: 350, range: 2.8, arc: 1.5, radius: 0.45,
@@ -229,13 +236,13 @@ function createBalancedBotRoster(characterIds, count, seed = 0) {
       ], comboReset: 0.75, color: 0x4777ff,
     },
     skills: [
-      { id: 'pull', name: 'Cursed Technique Lapse - Blue', shortName: 'BLUE', cooldown: 10, range: 7.5, radius: 2.4, damage: 300, slow: 0.3, duration: 1.4, pullSpeed: 3, color: 0x416cff },
+      { id: 'pull', name: 'Cursed Technique Lapse - Blue', shortName: 'BLUE', cooldown: 10, range: 7.5, radius: 2.4, damage: 300, slow: 0.3, duration: 2.4, pullSpeed: 3, color: 0x416cff },
       { id: 'repulse', name: 'Cursed Technique Reversal - Red', shortName: 'RED', cooldown: 11, range: 5, damage: 700, width: 0.55, knockback: 5.5, wallStun: 0.7, color: 0xff456d },
     ],
-    super: { kind: 'gojo-domain', name: 'Domain Expansion - Infinite Void', range: 7.5, radius: 3.8, warningDelay: 0.5, duration: 1.5, freeze: 1.5, color: 0x617cff },
+    super: { kind: 'gojo-domain', name: 'Domain Expansion - Infinite Void', range: 7.5, radius: 3.8, warningDelay: 0.5, duration: 4, freeze: 1.5, color: 0x617cff },
   };
   Bc.sukuna = {
-    id: 'sukuna', name: 'Sukuna', alias: 'Sukuna', role: 'Aggressive Slasher',
+    id: 'sukuna', name: 'Sukuna', alias: 'Sukuna', role: 'Aggressive Fire Mage',
     blurb: 'Cleave up close, cut through foes with Dismantle, then charge Fuga.',
     hp: 4200, speed: 3.25, reload: 1.1, preferred: 3.1, maxAmmo: 3, superCharge: 4000,
     stats: { durability: 4, agility: 3, damage: 5, range: 2 },
@@ -243,9 +250,9 @@ function createBalancedBotRoster(characterIds, count, seed = 0) {
     visual: 'sorcerer', palette: { body: 0x21191f, dark: 0x101116, accent: 0x9e2437, skin: 0xd6a18c },
     attack: { kind: 'melee', name: 'Cleave', count: 1, interval: 0.12, damage: 450, range: 3, arc: 1.5, radius: 0.45, cooldown: 0.24, color: 0xf34255, sukunaBasic: true },
     skills: [
-      { id: 'long-slash', name: 'Dismantle', shortName: 'DISMANTLE', cooldown: 7, range: 7.5, damage: 600, maxTargets: 3, width: 0.55, color: 0xe52d45 },
-      { id: 'flame', name: 'Fuga - Kamino / Flame Arrow', shortName: 'FUGA', cooldown: 12, chargeTime: 1, range: 9.5, tapDamage: 500, tapRange: 6, chargedDamage: 1100, chargedRange: 9.5, blast: 1.8, burnDamage: 90, burnDuration: 3, projectileSpeed: 18, color: 0xff642e },
+      { id: 'long-slash', name: 'Dismantle', shortName: 'DISMANTLE', cooldown: 7, range: 10, damage: 600, maxTargets: 3, width: 0.55, color: 0xe52d45 },
+      { id: 'flame', name: 'Fuga - Kamino / Flame Arrow', shortName: 'FUGA', cooldown: 12, chargeTime: 1, range: 13.5, tapDamage: 500, tapRange: 9, chargedDamage: 1100, chargedRange: 13.5, blast: 1.8, burnDamage: 90, burnDuration: 3, projectileSpeed: 18, color: 0xff642e },
     ],
-    super: { kind: 'sukuna-zone', name: 'Domain Expansion - Malevolent Shrine', range: 7.5, radius: 4.5, warningDelay: 0.45, duration: 4, waveCount: 8, waveInterval: 0.5, waveDamage: 180, breaksWalls: true, color: 0xe52d45 },
+    super: { kind: 'sukuna-zone', name: 'Domain Expansion - Malevolent Shrine', range: 10.5, radius: 4.5, warningDelay: 0.45, duration: 4, waveCount: 8, waveInterval: 0.5, waveDamage: 180, breaksWalls: true, color: 0xe52d45 },
   };
 })();

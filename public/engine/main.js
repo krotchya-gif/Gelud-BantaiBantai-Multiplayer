@@ -76,6 +76,17 @@ var ld = class {
       (this.elapsed = 0),
       (this.matchTime = 0),
       (this.timedTraps = new Map()),
+      this.trapMarkerFillGeometry = new mr(1, 48).rotateX(-Math.PI / 2),
+      this.trapMarkerRingGeometry = new br(0.9, 1, 48).rotateX(-Math.PI / 2),
+      this.networkTrapBatch = [],
+      this.networkSeenPlayers = new Set(),
+      this.networkSeenProjectiles = new Set(),
+      this.networkSeenItems = new Set(),
+      this.networkSeenAreas = new Set(),
+      this.networkSeenTraps = new Set(),
+      this.guideDashSkills = new Set([`combat-slide`, `tactical-roll`, `iron-charge`, `swift-flash`]),
+      this.guideProjectileSkills = new Set([`piercing-bolt`, `kunai-dash`, `sticky-grenade`]),
+      this.guideAuraSkills = new Set([`smoke-screen`, `smoke-bomb`, `taunt-echo`, `chain-lightning`, `overcharge-volt`, `parry-stance`, `eagle-eye`]),
       (this.nextTrapAt = 60),
       (this.nextTrapId = 1),
       (this.state = `menu`),
@@ -298,12 +309,13 @@ var ld = class {
     (t &&
       ((this.userPickedQuality = !0),
       (this.mobileDefaultQuality = !1)),
+      t && (this.pipeline.performanceScale = 1),
       this.pipeline.setQuality(e),
       this.perf && ((this.perf.t = 0), (this.perf.frames = 0)),
       this.effects?.setQuality(this.pipeline.quality.tier),
       this.gas?.setQuality(this.pipeline.quality.tier),
       this.lighting.applyQuality(this.pipeline.quality),
-      (this.lighting.key.castShadow = !this.mobileDefaultQuality),
+      (this.lighting.key.castShadow = !this.pipeline.isWebGPU && !this.mobileDefaultQuality),
       this.pipeline.requestShadowUpdate(!0),
       this.hud.syncSettings(),
       this.save());
@@ -647,25 +659,41 @@ var ld = class {
     this.hud.syncSettings();
     document.body.classList.add(`playing`);
   }
+  setNetworkAim(x, z) {
+    if (!Number.isFinite(x) || !Number.isFinite(z)) {
+      if (!this.networkAim) this.networkAim = { x: 0, z: 1 };
+      return this.networkAim;
+    }
+    if (!this.networkAim) this.networkAim = { x: 0, z: 1 };
+    this.networkAim.x = x;
+    this.networkAim.z = z;
+    return this.networkAim;
+  }
   networkAimDirection(player, axis = null) {
     if (!player) return null;
     if (this.input.touchMode) {
-      const skillPointer = [...this.input.skillPointers.values()].find((pointer) => pointer.moved);
+      let skillPointer = null;
+      for (const pointer of this.input.skillPointers.values()) {
+        if (pointer.moved) {
+          skillPointer = pointer;
+          break;
+        }
+      }
       if (skillPointer) {
         const definition = player.def.skills?.[skillPointer.skill - 1];
         const skillAim = definition ? this.stickAim(skillPointer, definition) : null;
-        if (skillAim) this.networkAim = { x: skillAim.dx, z: skillAim.dz };
-        return this.networkAim || { x: Math.sin(player.facing), z: Math.cos(player.facing) };
+        if (skillAim) this.setNetworkAim(skillAim.dx, skillAim.dz);
+        return this.networkAim || this.setNetworkAim(Math.sin(player.facing), Math.cos(player.facing));
       }
       const stick = this.input.sticks.aim;
       if (stick.id !== null && stick.mag > 0.22) {
-        const length = Math.hypot(stick.x, stick.y) || 1;
-        this.networkAim = { x: stick.x / length, z: stick.y / length };
+        const length = Math.hypot(stick.x, stick.y);
+        if (length > 1e-8) this.setNetworkAim(stick.x / length, stick.y / length);
       } else if (axis && Math.hypot(axis.x, axis.z) > 0.08) {
-        const length = Math.hypot(axis.x, axis.z) || 1;
-        this.networkAim = { x: axis.x / length, z: axis.z / length };
+        const length = Math.hypot(axis.x, axis.z);
+        if (length > 1e-8) this.setNetworkAim(axis.x / length, axis.z / length);
       }
-      return this.networkAim || { x: Math.sin(player.facing), z: Math.cos(player.facing) };
+      return this.networkAim || this.setNetworkAim(Math.sin(player.facing), Math.cos(player.facing));
     }
     rd.set(this.input.ndcX, this.input.ndcY);
     nd.setFromCamera(rd, this.camera);
@@ -674,15 +702,19 @@ var ld = class {
       const z = ad.z - player.z;
       const length = Math.hypot(x, z);
       if (length > 1e-6) {
-        this.networkAim = { x: x / length, z: z / length };
+        this.setNetworkAim(x / length, z / length);
         return this.networkAim;
       }
     }
-    return this.networkAim || { x: Math.sin(player.facing), z: Math.cos(player.facing) };
+    return this.networkAim || this.setNetworkAim(Math.sin(player.facing), Math.cos(player.facing));
   }
   updateNetworkPresentation(entity, dt, moving) {
     if (!entity) return;
     entity.networkLeapT = Math.max(0, (entity.networkLeapT || 0) - dt);
+    entity.defenseBreakT = Math.max(0, (entity.defenseBreakT || 0) - dt);
+    entity.tauntEchoT = Math.max(0, (entity.tauntEchoT || 0) - dt);
+    entity.damageReductionT = Math.max(0, (entity.damageReductionT || 0) - dt);
+    if (entity.networkChainTarget && this.elapsed - (entity.networkChainTargetAt || 0) > 0.75) entity.networkChainTarget = null;
     entity.spawnT = Math.max(0, (entity.spawnT || 0) - dt);
     entity.parryT = Math.max(0, (entity.parryT || 0) - dt);
     entity.flickerInvulnT = Math.max(0, (entity.flickerInvulnT || 0) - dt);
@@ -731,10 +763,11 @@ var ld = class {
     if (entity.networkDash?.leap) entity.model.body.rotation.x = $c(entity.networkDash.t / entity.networkDash.duration, 0, 1) * Math.PI * 2;
   }
   startNetworkFlicker(entity, event) {
-    if (!entity) return;
+    if (!entity || !Number.isFinite(event.fromX) || !Number.isFinite(event.fromZ) || !Number.isFinite(event.toX) || !Number.isFinite(event.toZ)) return !1;
     const dx = Number.isFinite(event.dx) ? event.dx : event.toX - event.fromX;
     const dz = Number.isFinite(event.dz) ? event.dz : event.toZ - event.fromZ;
-    const length = Math.hypot(dx, dz) || 1;
+    const length = Math.hypot(dx, dz);
+    if (!Number.isFinite(length) || length < 1e-8) return !1;
     entity.networkFlicker = {
       fromX: event.fromX,
       fromZ: event.fromZ,
@@ -750,6 +783,7 @@ var ld = class {
     entity.root.rotation.y = entity.facing;
     entity.squash = -0.35;
     this.effects.dust(event.fromX, event.fromZ, 6, 1.5);
+    return !0;
   }
   updateNetwork(e) {
     this.elapsed += e;
@@ -759,7 +793,7 @@ var ld = class {
     const player = this.player;
     const axis = this.input.axis();
     const aim = this.networkAimDirection(player, axis);
-    if (player && aim) {
+    if (player && aim && !player.networkDash && !player.networkFlicker && !player.airborne) {
       player.facing = Math.atan2(aim.x, aim.z);
       player.aimAngle = player.facing;
       player.root.rotation.y = player.facing;
@@ -785,7 +819,8 @@ var ld = class {
         // use the same nearest-target/facing fallback instead of sending a
         // zero vector to the authoritative server.
         const shotAim = shot.tap ? this.autoAim(player.def[kind]) : this.stickAim(shot, player.def[kind]);
-        this.networkAim = { x: shotAim.dx, z: shotAim.dz };
+        if (!shotAim || !Number.isFinite(shotAim.dx) || !Number.isFinite(shotAim.dz) || !Number.isFinite(shotAim.x) || !Number.isFinite(shotAim.z)) continue;
+        this.setNetworkAim(shotAim.dx, shotAim.dz);
         player.facing = Math.atan2(shotAim.dx, shotAim.dz);
         if (kind === `super`) this.networkSession.sendSuper(shotAim.dx, shotAim.dz, shotAim.x, shotAim.z);
         else {
@@ -810,8 +845,9 @@ var ld = class {
             ? this.autoAim(definition)
             : null;
         const direction = aimed ? { x: aimed.dx, z: aimed.dz } : aim || { x: Math.sin(player.facing), z: Math.cos(player.facing) };
+        if (!Number.isFinite(direction.x) || !Number.isFinite(direction.z)) continue;
         const range = definition?.range || 0;
-        this.networkAim = { x: direction.x, z: direction.z };
+        this.setNetworkAim(direction.x, direction.z);
         this.networkSession.sendSkill(
           action.skill,
           phase,
@@ -866,8 +902,10 @@ var ld = class {
         this.player.root.position.x = nl(this.player.root.position.x, predicted.x, 42, e);
         this.player.root.position.z = nl(this.player.root.position.z, predicted.z, 42, e);
       }
-      this.player.facing = il(this.player.facing, predicted.facing, 42, e);
-      this.player.aimAngle = this.player.facing;
+      if (!this.player.networkDash && !this.player.networkFlicker && !this.player.airborne) {
+        this.player.facing = il(this.player.facing, predicted.facing, 42, e);
+        this.player.aimAngle = this.player.facing;
+      }
       this.player.vel.set(predicted?.velX || 0, predicted?.velZ || 0);
       const localMoving = this.player.vel.lengthSq() > 0.2;
       const localVisualFacing = localMoving && !this.player.networkCharging && !this.networkFire && (this.player.recoil || 0) < 0.18
@@ -878,7 +916,8 @@ var ld = class {
     }
     const snapshot = this.networkSession?.renderState(Date.now());
     if (snapshot) {
-      const seenPlayers = new Set();
+      const seenPlayers = this.networkSeenPlayers || (this.networkSeenPlayers = new Set());
+      seenPlayers.clear();
       for (const remote of snapshot.players || []) {
         seenPlayers.add(remote.id);
         const entity = this.networkEntities.get(remote.id);
@@ -887,8 +926,8 @@ var ld = class {
         if (!entity.networkDash && !entity.networkFlicker) entity.root.position.set(remote.x, 0, remote.z);
         entity.name = remote.name || entity.name;
         entity.characterName = remote.characterName || entity.characterName || entity.def.name;
-        entity.facing = il(entity.facing, remote.facing, 24, e);
-        entity.aimAngle = remote.facing;
+        if (!entity.networkDash && !entity.networkFlicker && !entity.airborne) entity.facing = il(entity.facing, remote.facing, 24, e);
+        entity.aimAngle = entity.facing;
         entity.vel.set(remote.velX || 0, remote.velZ || 0);
         entity.hp = remote.hp;
         entity.maxHp = remote.maxHp;
@@ -917,6 +956,14 @@ var ld = class {
         entity.skill2ChargeT = remote.skill2ChargeT || 0;
         entity.gojoBarrier = remote.gojoBarrier === true;
         entity.gojoBarrierRemaining = remote.gojoBarrierRemaining || 0;
+        entity.overchargeT = remote.overchargeT || 0;
+        entity.defenseBreakT = remote.defenseBreakT || 0;
+        entity.stealthT = remote.stealthT || 0;
+        entity.smokeConcealed = remote.concealed === true;
+        entity.eagleEyeT = remote.eagleEyeT || 0;
+        entity.pierceCoverShots = remote.pierceCoverShots || 0;
+        entity.kunaiRecastTargetId = remote.kunaiRecastTargetId || null;
+        entity.kunaiRecastRemaining = remote.kunaiRecastRemaining || 0;
         entity.hardCCT = remote.hardCCT || 0;
         entity.networkLeapT = remote.airborneT || 0;
         entity.sukunaRushT = remote.sukunaRushT || 0;
@@ -969,6 +1016,14 @@ var ld = class {
           this.player.skill2ChargeT = local.skill2ChargeT || 0;
           this.player.gojoBarrier = local.gojoBarrier === true;
           this.player.gojoBarrierRemaining = local.gojoBarrierRemaining || 0;
+          this.player.overchargeT = local.overchargeT || 0;
+          this.player.defenseBreakT = local.defenseBreakT || 0;
+          this.player.stealthT = local.stealthT || 0;
+          this.player.smokeConcealed = local.concealed === true;
+          this.player.eagleEyeT = local.eagleEyeT || 0;
+          this.player.pierceCoverShots = local.pierceCoverShots || 0;
+          this.player.kunaiRecastTargetId = local.kunaiRecastTargetId || null;
+          this.player.kunaiRecastRemaining = local.kunaiRecastRemaining || 0;
           this.player.hardCCT = local.hardCCT || 0;
           this.player.networkLeapT = local.airborneT || 0;
           this.player.sukunaRushT = local.sukunaRushT || 0;
@@ -981,7 +1036,11 @@ var ld = class {
       this.syncNetworkItems(snapshot.items || []);
       this.syncNetworkAreas(snapshot.areaEffects || []);
       this.syncNetworkBrokenCover(snapshot.brokenCover || []);
-      this.syncNetworkTraps(snapshot.traps || []);
+      const trapBatch = this.networkTrapBatch || (this.networkTrapBatch = []);
+      trapBatch.length = 0;
+      for (const trap of snapshot.traps || []) trapBatch.push(trap);
+      for (const trap of snapshot.skillTraps || []) trapBatch.push(trap);
+      this.syncNetworkTraps(trapBatch);
       if (this.modeName !== `deathmatch`) this.gas.update(e, this.matchTime, false);
     }
     this.updateNetworkArrowFalls(e);
@@ -1092,7 +1151,12 @@ var ld = class {
       if (entity) {
         const duration = event.duration || entity.def.super.flight || 0.22;
         const dx = event.toX - event.fromX; const dz = event.toZ - event.fromZ;
-        const length = Math.hypot(dx, dz) || 1;
+        const length = Math.hypot(dx, dz);
+        if (!Number.isFinite(length) || length < 1e-8) {
+          entity.networkDash = null;
+          entity.networkLeapT = 0;
+          return;
+        }
         const leap = event.leap === true || (event.leap == null && entity.def.super.kind === `leap`);
         entity.networkLeapT = leap ? duration : 0;
         entity.networkDash = { ...event, dx: dx / length, dz: dz / length, t: 0, duration, leap };
@@ -1127,12 +1191,83 @@ var ld = class {
           }
           this.audio.play(`hit`, x, z);
         } else {
+          if (entity?.def.id === `gojo` || entity?.def.id === `sukuna`) entity.startSkillAnimation?.(3, entity.def.id === `gojo` ? 4 : 0.9);
+          if (entity?.def.id === `gojo` && event.kind === `gojo-domain`) this.combat.playGojoSuperVfx(entity, x, z);
           this.effects.burst(x, 0.7, z, color, 14, 3);
           this.audio.play(`super`, entity?.x ?? x, entity?.z ?? z);
         }
       }
     } else if (event.type === `SKILL_USED`) {
       entity?.startSkillAnimation?.(event.skill);
+    } else if (event.type === `SKILL_DASH`) {
+      if (entity) {
+        const dx = event.toX - event.fromX; const dz = event.toZ - event.fromZ;
+        const length = Math.hypot(dx, dz);
+        if (!Number.isFinite(length) || length < 1e-8) {
+          entity.networkDash = null;
+        } else {
+          entity.networkDash = { ...event, dx: dx / length, dz: dz / length, t: 0, duration: event.duration || 0.22, leap: false };
+          entity.recoil = 1;
+          this.effects.dust(event.fromX, event.fromZ, event.skillId === `iron-charge` ? 8 : 5, 1.5);
+          this.audio.play(event.skillId === `iron-charge` ? `leap` : `zap`, event.fromX, event.fromZ);
+        }
+      }
+    } else if (event.type === `SKILL_AURA`) {
+      if (entity) {
+        entity.tauntEchoT = Number.isFinite(event.duration) ? event.duration : 0;
+        entity.tauntEchoRadius = Number.isFinite(event.radius) ? event.radius : 3.5;
+        entity.tauntEchoSlow = 0.3;
+        entity.damageReduction = 0.3;
+        entity.damageReductionT = entity.tauntEchoT;
+        const color = new J(event.color || entity.lightColor || 0xc1c89a);
+        this.effects.ring(entity.x, entity.z, entity.tauntEchoRadius, color, 0.5, 1.3);
+        this.effects.impact(entity.x, 0.78, entity.z, color, 8);
+      }
+    } else if (event.type === `SKILL_ARC`) {
+      const color = new J(event.color || entity?.lightColor || 0xffa53a);
+      this.effects.electricImpact(event.x, 0.75, event.z, color, false);
+      entity && (entity.recoil = 0.9);
+    } else if (event.type === `SKILL_CHAIN_HIT`) {
+      const target = this.networkEntities.get(event.targetId);
+      const color = new J(event.color || 0xffdf55);
+      if (target) this.effects.electricImpact(target.x, 0.78, target.z, color, false);
+      if (entity && target) {
+        const previous = Number.isFinite(event.jump) && event.jump > 0 && entity.networkChainTarget?.alive ? entity.networkChainTarget : entity;
+        const arcX = target.x - previous.x;
+        const arcZ = target.z - previous.z;
+        const arcLength = Math.hypot(arcX, arcZ);
+        if (Number.isFinite(arcLength) && arcLength > 1e-8) this.effects.electricMuzzle(previous.x, 0.8, previous.z, arcX / arcLength, arcZ / arcLength, color, 0.8);
+        entity.networkChainTarget = target;
+        entity.networkChainTargetAt = this.elapsed;
+      }
+    } else if (event.type === `SKILL_STATUS`) {
+      if (entity) {
+        if (event.status === `stealth`) entity.stealthT = event.duration || 2;
+        if (event.status === `overcharge`) entity.overchargeT = event.duration || 3;
+        if (event.status === `eagle-eye`) entity.eagleEyeT = event.duration || 5;
+        this.effects.burst(entity.x, 0.72, entity.z, new J(event.color || 0xffffff), event.status === `eagle-eye` ? 12 : 9, 2.2);
+      }
+    } else if (event.type === `SKILL_PARRY_WINDOW`) {
+      if (entity) { entity.skillParryT = event.duration || 0.55; entity.skillParryFacing = entity.facing; this.effects.ring(entity.x, entity.z, 1, new J(event.color || 0xffdc75), 0.4, 1.2); }
+    } else if (event.type === `SKILL_PARRY`) {
+      if (entity) { entity.parryEmpowerT = 2; this.effects.impact(entity.x, 0.82, entity.z, new J(0xffdc75), 12); this.audio.play(`zap`, entity.x, entity.z); }
+    } else if (event.type === `SKILL_STICKY_ATTACH`) {
+      const attached = event.projectileId ? this.networkProjectiles?.get(event.projectileId) : null;
+      if (attached) {
+        attached.userData.stickyAttached = true;
+        attached.userData.stickyTargetId = event.targetId || null;
+        attached.userData.stickyFuse = Number.isFinite(event.fuse) ? event.fuse : 0;
+      }
+      if (Number.isFinite(event.x) && Number.isFinite(event.z)) this.effects.impact(event.x, 0.68, event.z, new J(event.color || 0xff8d3d), 5);
+    } else if (event.type === `KUNAI_RECAST_READY`) {
+      if (entity) { entity.kunaiRecastTargetId = event.targetId; entity.kunaiRecastRemaining = event.remaining || 2; this.effects.impact(entity.x, 0.75, entity.z, new J(0xd9e1dc), 6); }
+    } else if (event.type === `STEALTH_END`) {
+      if (entity) entity.stealthT = 0;
+    } else if (event.type === `DEFENSE_BROKEN`) {
+      const target = this.networkEntities.get(event.targetId);
+      if (target) { target.defenseBreakT = event.remaining || 2.5; this.effects.impact(target.x, 0.72, target.z, new J(0x89dcff), 5); }
+    } else if (event.type === `SKILL_TRAP_TRIGGERED`) {
+      this.effects.impact(event.x, 0.2, event.z, new J(event.color || 0xd2bd83), 8);
     } else if (event.type === `SKILL_ZONE`) {
       this.ensureNetworkAreaMarker(event);
       if (entity) {
@@ -1142,7 +1277,8 @@ var ld = class {
     } else if (event.type === `SKILL_SLASH`) {
       const dx = event.toX - event.fromX;
       const dz = event.toZ - event.fromZ;
-      const length = Math.hypot(dx, dz) || 1;
+      const length = Math.hypot(dx, dz);
+      if (!Number.isFinite(length) || length < 1e-8) return;
       const color = new J(event.color || entity?.superColor || 0xe52d45);
       this.effects.muzzle(event.fromX + dx / length * 0.35, 0.74, event.fromZ + dz / length * 0.35, dx / length, dz / length, color, 1.2);
       this.effects.impact(event.toX, 0.08, event.toZ, color, 12);
@@ -1162,6 +1298,7 @@ var ld = class {
       }
     } else if (event.type === `SKILL_CHARGE_RELEASE` || event.type === `SKILL_CHARGE_CANCEL`) {
       if (entity) {
+        entity.skill2Charge = null;
         entity.skill2Charging = false;
         entity.skill2ChargeT = 0;
         entity.recoil = event.type === `SKILL_CHARGE_RELEASE` ? 1 : entity.recoil;
@@ -1175,7 +1312,7 @@ var ld = class {
       const target = this.networkEntities.get(event.targetId);
       if (target) {
         target.gojoBarrier = false;
-        target.gojoBarrierRemaining = 10;
+        target.gojoBarrierRemaining = 5;
         this.effects.impact(target.x, 0.82, target.z, new J(0x4f79ff), 12);
         this.audio.play(`zap`, target.x, target.z);
       }
@@ -1259,20 +1396,34 @@ var ld = class {
     return mesh;
   }
   syncNetworkProjectiles(projectiles) {
-    const seen = new Set();
+    const seen = this.networkSeenProjectiles || (this.networkSeenProjectiles = new Set());
+    seen.clear();
     for (const projectile of projectiles) {
+      if (!Number.isFinite(projectile.x) || !Number.isFinite(projectile.z)) continue;
       seen.add(projectile.id);
       const mesh = this.ensureNetworkProjectile(projectile);
-      mesh.position.set(projectile.x, 0.72 + (projectile.height || 0), projectile.z);
-      mesh.rotation.y = Math.atan2(projectile.dirX, projectile.dirZ);
+      let x = projectile.x;
+      let z = projectile.z;
+      const attachedId = projectile.stickyTargetId;
+      if (attachedId && attachedId !== `cover`) {
+        const attached = this.networkEntities.get(attachedId);
+        if (attached?.alive) {
+          x = attached.x + (Number.isFinite(projectile.stickyOffsetX) ? projectile.stickyOffsetX : 0);
+          z = attached.z + (Number.isFinite(projectile.stickyOffsetZ) ? projectile.stickyOffsetZ : 0);
+        }
+      }
+      mesh.userData.stickyAttached = !!attachedId;
+      mesh.userData.stickyTargetId = attachedId || null;
+      mesh.position.set(x, 0.72 + (projectile.height || 0), z);
+      mesh.rotation.y = Math.atan2(projectile.dirX || 0, projectile.dirZ || 1);
       const scale = projectile.kind === `bomb` ? (projectile.isSuper ? 1.75 : 1.3) : projectile.radius > 0.25 ? 1.45 : 1;
       mesh.scale.setScalar(scale);
-      this.lighting.addLight(projectile.x, 0.72 + (projectile.height || 0), projectile.z, mesh.material.color, projectile.isSuper ? 2.6 : 1.9, 4.2);
+      this.lighting.addLight(x, 0.72 + (projectile.height || 0), z, mesh.material.color, projectile.isSuper ? 2.6 : 1.9, 4.2);
       const trailsEnabled = this.pipeline.quality.tier > 0 && !this.lowEndDevice;
       if (trailsEnabled && this.elapsed - mesh.userData.trailAt > (projectile.electric ? 0.032 : 0.055)) {
         mesh.userData.trailAt = this.elapsed;
-        if (projectile.electric) this.effects.electricTrail(projectile.x, 0.72 + (projectile.height || 0), projectile.z, mesh.material.color, projectile.isSuper ? 0.28 : 0.18);
-        else this.effects.trail(projectile.x, 0.72 + (projectile.height || 0), projectile.z, mesh.material.color, projectile.isSuper ? 0.23 : 0.14);
+        if (projectile.electric) this.effects.electricTrail(x, 0.72 + (projectile.height || 0), z, mesh.material.color, projectile.isSuper ? 0.28 : 0.18);
+        else this.effects.trail(x, 0.72 + (projectile.height || 0), z, mesh.material.color, projectile.isSuper ? 0.23 : 0.14);
       }
     }
     for (const [id, mesh] of this.networkProjectiles) {
@@ -1284,7 +1435,8 @@ var ld = class {
     }
   }
   syncNetworkItems(items) {
-    const seen = new Set();
+    const seen = this.networkSeenItems || (this.networkSeenItems = new Set());
+    seen.clear();
     for (const item of items) {
       seen.add(item.id);
       let mesh = this.networkItems.get(item.id);
@@ -1321,7 +1473,7 @@ var ld = class {
     }
   }
   ensureNetworkAreaMarker(area) {
-    if (!area?.id || ![`arrow-shower`, `gojo-pull`, `gojo-domain`, `sukuna-zone`].includes(area.kind) || !this.networkAreaMarkers) return;
+    if (!area?.id || ![`arrow-shower`, `gojo-pull`, `gojo-domain`, `sukuna-zone`, `smoke-screen`].includes(area.kind) || !this.networkAreaMarkers) return;
     let marker = this.networkAreaMarkers.get(area.id);
     if (!marker) {
       marker = new ut();
@@ -1349,14 +1501,24 @@ var ld = class {
         marker.add(orb);
         marker.userData.areaOrb = orb;
       }
+      if (area.kind === `sukuna-zone`) {
+        const shrine = this.combat.createShrineVisual();
+        marker.add(shrine);
+        marker.userData.shrine = shrine;
+      }
+      if (area.kind === `smoke-screen`) {
+        discMaterial.color.set(0x85918c);
+        ringMaterial.color.set(0xb8c2bc);
+      }
       this.scene.add(marker);
       this.networkAreaMarkers.set(area.id, marker);
     }
     marker.position.set(area.x, 0.055, area.z);
     const activated = area.kind === `gojo-pull` || area.activated === true || (Number.isFinite(area.warning) && area.warning <= 0);
-    if (marker.userData.areaDisc) marker.userData.areaDisc.material.opacity = activated ? 0.13 : 0.07 + Math.max(0, Math.sin(this.elapsed * 18)) * 0.08;
-    if (marker.userData.areaRing) marker.userData.areaRing.material.opacity = activated ? 0.82 : 0.55 + Math.max(0, Math.sin(this.elapsed * 18)) * 0.4;
+    if (marker.userData.areaDisc) marker.userData.areaDisc.material.opacity = area.kind === `smoke-screen` ? 0.2 : activated ? 0.13 : 0.07 + Math.max(0, Math.sin(this.elapsed * 18)) * 0.08;
+    if (marker.userData.areaRing) marker.userData.areaRing.material.opacity = area.kind === `smoke-screen` ? 0.48 : activated ? 0.82 : 0.55 + Math.max(0, Math.sin(this.elapsed * 18)) * 0.4;
     marker.scale.setScalar((area.radius || 3.4) / 3.4 * (activated ? 1 + Math.sin(this.elapsed * 13) * 0.018 : 1));
+    if (marker.userData.shrine) marker.userData.shrine.rotation.y = Math.sin(this.elapsed * 0.25) * 0.025;
     if (marker.userData.areaOrb) {
       const fade = $c((area.remaining ?? 1.4) / 0.22, 0, 1);
       const orb = marker.userData.areaOrb;
@@ -1370,7 +1532,7 @@ var ld = class {
     if (!marker) return;
     this.scene.remove(marker);
     if (marker.userData?.ownsAreaMaterials)
-      disposeRendererResources(marker.children.map((child) => child.material));
+      disposeRendererResources(marker.children.filter((child) => !child.userData?.sharedShrineMaterial).map((child) => child.material));
   }
   spawnNetworkArrowFalls(x, z, radius) {
     if (!this.networkArrowFalls) return;
@@ -1402,10 +1564,11 @@ var ld = class {
     if (count) mesh.instanceMatrix.needsUpdate = true;
   }
   syncNetworkAreas(areas) {
-    const active = new Set();
+    const active = this.networkSeenAreas || (this.networkSeenAreas = new Set());
+    active.clear();
     for (const area of areas) {
       active.add(area.id);
-      if ([`arrow-shower`, `gojo-pull`, `gojo-domain`, `sukuna-zone`].includes(area.kind)) {
+      if ([`arrow-shower`, `gojo-pull`, `gojo-domain`, `sukuna-zone`, `smoke-screen`].includes(area.kind)) {
         this.ensureNetworkAreaMarker(area);
         continue;
       }
@@ -1494,8 +1657,20 @@ var ld = class {
       (e.reloadT = 0),
       (e.superCharge = 0),
       (e.skill2Charge = null),
+      (e.skill2Charging = !1),
+      (e.skill2ChargeT = 0),
+      (e.skillAnimation = null),
       (e.gojoBarrier = !1),
-      (e.gojoBarrierReadyAt = this.matchTime + 10),
+      (e.gojoBarrierReadyAt = this.matchTime + 5),
+      (e.damageReductionT = 0),
+      (e.damageReduction = 0),
+      (e.defenseBreakT = 0),
+      (e.ccImmuneT = 0),
+      (e.overchargeT = 0),
+      (e.stealthT = 0),
+      (e.smokeRevealT = 0),
+      (e.eagleEyeT = 0),
+      (e.pierceCoverShots = 0),
       (e.hardCCT = 0),
       (e.hardCCRecoveryT = 0),
       e.slowEffects.clear(),
@@ -1645,17 +1820,15 @@ var ld = class {
   }
   createTrapMarker() {
     const marker = new ut();
-    const fillGeometry = new mr(1, 48).rotateX(-Math.PI / 2);
-    const ringGeometry = new br(0.9, 1, 48).rotateX(-Math.PI / 2);
     const fillMaterial = new Tn({ color: 0xff3e4b, transparent: !0, opacity: 0.12, depthWrite: !1, side: 2 });
     const ringMaterial = new Tn({ color: 0xff3e4b, transparent: !0, opacity: 0.78, depthWrite: !1, side: 2 });
-    const fill = new Ln(fillGeometry, fillMaterial);
-    const ring = new Ln(ringGeometry, ringMaterial);
+    const fill = new Ln(this.trapMarkerFillGeometry, fillMaterial);
+    const ring = new Ln(this.trapMarkerRingGeometry, ringMaterial);
     fill.position.y = 0.02;
     ring.position.y = 0.035;
     marker.add(fill, ring);
     marker.userData.trapParts = { fill, ring };
-    marker.userData.trapGeometry = [fillGeometry, ringGeometry];
+    marker.userData.trapGeometry = [];
     marker.userData.trapMaterials = [fillMaterial, ringMaterial];
     marker.renderOrder = 3;
     this.scene.add(marker);
@@ -1664,14 +1837,14 @@ var ld = class {
   updateTrapMarker(marker, trap) {
     if (!marker) return;
     const warning = trap.phase === `warning`;
-    const color = warning ? 0xff3147 : trap.kind === `burning` ? 0xff7a30 : trap.kind === `poison` ? 0x59e36c : 0xff3e4b;
+    const color = trap.kind === `caltrops` ? 0xd2bd83 : warning ? 0xff3147 : trap.kind === `burning` ? 0xff7a30 : trap.kind === `poison` ? 0x59e36c : 0xff3e4b;
     const pulse = 0.5 + Math.sin(this.elapsed * 11) * 0.5;
     const { fill, ring } = marker.userData.trapParts;
     marker.position.set(trap.x, 0, trap.z);
     marker.scale.set(trap.radius, 1, trap.radius);
     fill.material.color.set(color);
     ring.material.color.set(color);
-    fill.material.opacity = warning ? 0.07 + pulse * 0.1 : trap.kind === `poison` ? 0.2 : 0.25;
+    fill.material.opacity = trap.kind === `caltrops` ? 0.14 : warning ? 0.07 + pulse * 0.1 : trap.kind === `poison` ? 0.2 : 0.25;
     ring.material.opacity = warning ? 0.48 + pulse * 0.42 : 0.72;
   }
   disposeTrapMarker(marker) {
@@ -1691,7 +1864,8 @@ var ld = class {
   }
   syncNetworkTraps(traps) {
     if (!this.networkTrapMarkers) return;
-    const active = new Set();
+    const active = this.networkSeenTraps || (this.networkSeenTraps = new Set());
+    active.clear();
     for (const trap of traps) {
       if (!trap?.id || !Number.isFinite(trap.x) || !Number.isFinite(trap.z)) continue;
       active.add(trap.id);
@@ -1803,93 +1977,156 @@ var ld = class {
     ((this.guide = t), this.scene.add(t), (this.sectorGeos = {}));
   }
   setupGuideFor(e) {
-    for (let t of [`attack`, `super`]) {
-      let n = e[t];
-      (n.kind === `spread` || n.arc) &&
-        (this.sectorGeos[t] && this.sectorGeos[t].dispose(),
-        (this.sectorGeos[t] = new mr(
-          1,
-          28,
-          n.kind === `spread` ? -n.spread / 2 - 0.07 : -n.arc / 2,
-          n.kind === `spread` ? n.spread + 0.14 : n.arc,
-        ).rotateX(-Math.PI / 2)));
+    const definitions = [[`attack`, e.attack], ...(e.skills || []).map((skill, index) => [`skill${index}`, skill]), [`super`, e.super]];
+    for (const [key, definition] of definitions) {
+      if (!definition || (definition.kind !== `spread` && !definition.arc)) continue;
+      this.sectorGeos[key]?.dispose();
+      this.sectorGeos[key] = new mr(
+        1,
+        28,
+        definition.kind === `spread` ? -definition.spread / 2 - 0.07 : -definition.arc / 2,
+        definition.kind === `spread` ? definition.spread + 0.14 : definition.arc,
+      ).rotateX(-Math.PI / 2);
     }
   }
   updateGuide(e, t, n, r, i, a, charge = 0) {
     let o = this.player,
       s = this.guide;
-    ((s.visible = !0), s.position.set(o.x, 0.06, o.z), (s.rotation.y = Math.atan2(n, r) - Math.PI / 2));
+    if (!s) return;
+    if (!e || !o || !Number.isFinite(o.x) || !Number.isFinite(o.z) || !Number.isFinite(n) || !Number.isFinite(r) || !Number.isFinite(i) || !Number.isFinite(charge)) {
+      s.visible = !1;
+      return;
+    }
+    const directionLength = Math.hypot(n, r);
+    if (directionLength < 1e-8) {
+      s.visible = !1;
+      return;
+    }
+    n /= directionLength;
+    r /= directionLength;
+    s.visible = !0;
+    s.position.set(o.x, 0.06, o.z);
+    s.rotation.y = Math.atan2(n, r) - Math.PI / 2;
     let c = t === `skill` && e.color ? e.color : a ? 16765498 : 16777215,
       l = a ? 0.34 : 0.17;
-    if (((this.guideRect.visible = this.guideSector.visible = this.guideCircle.visible = !1),
-      e.kind === `spread` || e.arc))
-      ((this.guideSector.geometry = this.sectorGeos[t]),
-        this.guideSector.scale.setScalar(e.range),
-        (this.guideSector.visible = !0),
-        this.guideSector.material.color.set(c),
-        (this.guideSector.material.opacity = l));
-    else if (e.kind === `dash` || e.kind === `iaido`) {
-      let t = Math.min(i, e.range),
-        hit = this.world.raycast(o.x, o.z, o.x + n * t, o.z + r * t);
-      hit && (t = Math.max(0.3, hit.dist - 0.3));
-      (this.guideRect.scale.set(t, 1, e.kind === `iaido` ? e.slashRadius * 2 : 0.16),
-        (this.guideRect.visible = !0),
-        this.guideRect.material.color.set(c),
-        (this.guideRect.material.opacity = l));
-    } else if (t === `skill` && e.id === `pull`) {
-      let distance = Math.min(i, e.range),
-        hit = this.world.raycast(o.x, o.z, o.x + n * distance, o.z + r * distance);
+    const skill = t === `skill`;
+    const dashSkills = this.guideDashSkills || (this.guideDashSkills = new Set([`combat-slide`, `tactical-roll`, `iron-charge`, `swift-flash`]));
+    const projectileSkills = this.guideProjectileSkills || (this.guideProjectileSkills = new Set([`piercing-bolt`, `kunai-dash`, `sticky-grenade`]));
+    const auraSkills = this.guideAuraSkills || (this.guideAuraSkills = new Set([`smoke-screen`, `smoke-bomb`, `taunt-echo`, `chain-lightning`, `overcharge-volt`, `parry-stance`, `eagle-eye`]));
+    const dashSkill = skill && dashSkills.has(e.id);
+    const projectileSkill = skill && projectileSkills.has(e.id);
+    const trapSkill = skill && e.id === `caltrops-trap`;
+    const auraSkill = skill && auraSkills.has(e.id);
+    this.guideRect.visible = this.guideSector.visible = this.guideCircle.visible = !1;
+    if (dashSkill) {
+      const distance = Math.max(0.1, Math.min(i, Number.isFinite(e.distance) ? e.distance : i));
+      const hit = this.world.raycast(o.x, o.z, o.x + n * distance, o.z + r * distance);
+      const visibleDistance = hit ? Math.max(0.1, hit.dist - 0.3) : distance;
+      this.guideRect.scale.set(visibleDistance, 1, 0.18);
+      this.guideRect.visible = !0;
+      this.guideRect.material.color.set(c);
+      this.guideRect.material.opacity = l;
+    } else if (projectileSkill) {
+      const range = Number.isFinite(e.range) ? e.range : 1;
+      const distance = Math.max(0.1, Math.min(i, range));
+      const hit = this.world.raycast(o.x, o.z, o.x + n * distance, o.z + r * distance);
+      const visibleDistance = hit ? Math.max(0.1, hit.dist - 0.3) : distance;
+      this.guideRect.scale.set(visibleDistance, 1, e.id === `sticky-grenade` ? 0.28 : 0.16);
+      this.guideRect.visible = !0;
+      this.guideRect.material.color.set(c);
+      this.guideRect.material.opacity = l;
+    } else if (trapSkill) {
+      const radius = Number.isFinite(e.radius) ? e.radius : 0.7;
+      this.guideCircle.position.set(0, 0, 0);
+      this.guideCircle.scale.setScalar(radius);
+      this.guideCircle.visible = !0;
+      this.guideCircle.material.color.set(c);
+      this.guideCircle.material.opacity = 0.28;
+      this.guideRing.material.color.set(c);
+      this.guideRing.material.opacity = 0.86;
+    } else if (auraSkill) {
+      const radius = Number.isFinite(e.radius) ? e.radius : Number.isFinite(e.range) ? e.range : 1.2;
+      this.guideCircle.position.set(0, 0, 0);
+      this.guideCircle.scale.setScalar(radius);
+      this.guideCircle.visible = !0;
+      this.guideCircle.material.color.set(c);
+      this.guideCircle.material.opacity = 0.22;
+      this.guideRing.material.color.set(c);
+      this.guideRing.material.opacity = 0.72;
+    } else if (e.kind === `spread` || e.arc) {
+      const geometry = this.sectorGeos[t === `skill` ? `skill0` : t];
+      if (geometry) {
+        this.guideSector.geometry = geometry;
+        this.guideSector.scale.setScalar(Number.isFinite(e.range) ? e.range : 1);
+        this.guideSector.visible = !0;
+        this.guideSector.material.color.set(c);
+        this.guideSector.material.opacity = l;
+      }
+    } else if (e.kind === `dash` || e.kind === `iaido`) {
+      let distance = Math.min(i, Number.isFinite(e.range) ? e.range : i);
+      const hit = this.world.raycast(o.x, o.z, o.x + n * distance, o.z + r * distance);
       hit && (distance = Math.max(0.3, hit.dist - 0.3));
-      (this.guideCircle.position.set(distance, 0, 0),
-        this.guideCircle.scale.setScalar(e.radius),
-        (this.guideCircle.visible = !0),
-        this.guideCircle.material.color.set(c),
-        (this.guideCircle.material.opacity = 0.28),
-        this.guideRing.material.color.set(c),
-        (this.guideRing.material.opacity = 0.86));
-    } else if (t === `skill` && (e.id === `repulse` || e.id === `long-slash` || e.id === `flame`)) {
-      let range = e.id === `flame` ? charge >= 1 ? e.chargedRange : e.tapRange : e.range,
-        distance = Math.min(i, range),
-        hit = this.world.raycast(o.x, o.z, o.x + n * distance, o.z + r * distance);
+      this.guideRect.scale.set(distance, 1, e.kind === `iaido` ? (e.slashRadius || 0.8) * 2 : 0.16);
+      this.guideRect.visible = !0;
+      this.guideRect.material.color.set(c);
+      this.guideRect.material.opacity = l;
+    } else if (skill && e.id === `pull`) {
+      let distance = Math.min(i, Number.isFinite(e.range) ? e.range : i);
+      const hit = this.world.raycast(o.x, o.z, o.x + n * distance, o.z + r * distance);
       hit && (distance = Math.max(0.3, hit.dist - 0.3));
-      (this.guideRect.scale.set(distance, 1, Math.max(0.14, (e.width || 0.18) * 2)),
-        (this.guideRect.visible = !0),
-        this.guideRect.material.color.set(c),
-        (this.guideRect.material.opacity = 0.26),
-        this.guideCircle.position.set(distance, 0, 0),
-        this.guideCircle.scale.setScalar(e.id === `flame` && charge >= 1 ? e.blast : 0.24),
-        (this.guideCircle.visible = !0),
-        this.guideCircle.material.color.set(c),
-        (this.guideCircle.material.opacity = e.id === `flame` && charge >= 1 ? 0.3 : 0.16),
-        this.guideRing.material.color.set(c));
+      this.guideCircle.position.set(distance, 0, 0);
+      this.guideCircle.scale.setScalar(Number.isFinite(e.radius) ? e.radius : 1);
+      this.guideCircle.visible = !0;
+      this.guideCircle.material.color.set(c);
+      this.guideCircle.material.opacity = 0.28;
+      this.guideRing.material.color.set(c);
+      this.guideRing.material.opacity = 0.86;
+    } else if (skill && (e.id === `repulse` || e.id === `long-slash` || e.id === `flame`)) {
+      const range = e.id === `flame` ? charge >= 1 ? e.chargedRange : e.tapRange : e.range;
+      let distance = Math.min(i, Number.isFinite(range) ? range : i);
+      const hit = this.world.raycast(o.x, o.z, o.x + n * distance, o.z + r * distance);
+      hit && (distance = Math.max(0.3, hit.dist - 0.3));
+      this.guideRect.scale.set(distance, 1, Math.max(0.14, (e.width || 0.18) * 2));
+      this.guideRect.visible = !0;
+      this.guideRect.material.color.set(c);
+      this.guideRect.material.opacity = 0.26;
+      this.guideCircle.position.set(distance, 0, 0);
+      this.guideCircle.scale.setScalar(e.id === `flame` && charge >= 1 ? e.blast || 1.8 : 0.24);
+      this.guideCircle.visible = !0;
+      this.guideCircle.material.color.set(c);
+      this.guideCircle.material.opacity = e.id === `flame` && charge >= 1 ? 0.3 : 0.16;
+      this.guideRing.material.color.set(c);
     } else if (e.kind === `arrow-shower`) {
-      let distance = Math.min(i, e.range);
-      (this.guideCircle.position.set(distance, 0, 0),
-        this.guideCircle.scale.setScalar(e.areaRadius),
-        (this.guideCircle.visible = !0),
-        this.guideCircle.material.color.set(c),
-        (this.guideCircle.material.opacity = 0.34),
-        this.guideRing.material.color.set(c));
+      const distance = Math.min(i, Number.isFinite(e.range) ? e.range : i);
+      this.guideCircle.position.set(distance, 0, 0);
+      this.guideCircle.scale.setScalar(Number.isFinite(e.areaRadius) ? e.areaRadius : 1);
+      this.guideCircle.visible = !0;
+      this.guideCircle.material.color.set(c);
+      this.guideCircle.material.opacity = 0.34;
+      this.guideRing.material.color.set(c);
     } else if (e.kind === `burst` || e.kind === `melee`) {
-      let t = e.range,
-        i = this.world.raycast(o.x, o.z, o.x + n * e.range, o.z + r * e.range);
-      (i && !(e.breaksWalls && this.world.isBreakable(i.tx, i.ty)) && (t = Math.max(0.6, i.dist)),
-        this.guideRect.scale.set(t, 1, Math.max(0.42, e.radius * 2.6)),
-        (this.guideRect.visible = !0),
-        this.guideRect.material.color.set(c),
-        (this.guideRect.material.opacity = l));
+      const range = Number.isFinite(e.range) ? e.range : 1;
+      let distance = range;
+      const hit = this.world.raycast(o.x, o.z, o.x + n * range, o.z + r * range);
+      hit && !(e.breaksWalls && this.world.isBreakable(hit.tx, hit.ty)) && (distance = Math.max(0.6, hit.dist));
+      this.guideRect.scale.set(distance, 1, Math.max(0.42, (e.radius || 0.4) * 2.6));
+      this.guideRect.visible = !0;
+      this.guideRect.material.color.set(c);
+      this.guideRect.material.opacity = l;
     } else {
-      let t = $c(i, e.kind === `leap` ? 2 : 0.5, e.range);
-      (this.guideCircle.position.set(t, 0, 0),
-        this.guideCircle.scale.setScalar(e.blast),
-        (this.guideCircle.visible = !0),
-        this.guideCircle.material.color.set(c),
-        (this.guideCircle.material.opacity = l * 0.8),
-        this.guideRing.material.color.set(c),
-        this.guideRect.scale.set(Math.max(0.1, t - e.blast), 1, 0.12),
-        (this.guideRect.visible = !0),
-        this.guideRect.material.color.set(c),
-        (this.guideRect.material.opacity = l));
+      const range = Number.isFinite(e.range) ? e.range : 1.5;
+      const blast = Number.isFinite(e.blast) ? e.blast : 0.5;
+      const distance = $c(i, e.kind === `leap` ? 2 : 0.5, range);
+      this.guideCircle.position.set(distance, 0, 0);
+      this.guideCircle.scale.setScalar(blast);
+      this.guideCircle.visible = !0;
+      this.guideCircle.material.color.set(c);
+      this.guideCircle.material.opacity = l * 0.8;
+      this.guideRing.material.color.set(c);
+      this.guideRect.scale.set(Math.max(0.1, distance - blast), 1, 0.12);
+      this.guideRect.visible = !0;
+      this.guideRect.material.color.set(c);
+      this.guideRect.material.opacity = l;
     }
   }
   controlPlayer() {
@@ -1950,6 +2187,7 @@ var ld = class {
       if (n.cancelled) continue;
       let t = n.kind === `super` ? e.def.super : e.def.attack,
         r = n.tap ? this.autoAim(t) : this.stickAim(n, t);
+      if (!r || !Number.isFinite(r.dx) || !Number.isFinite(r.dz) || !Number.isFinite(r.x) || !Number.isFinite(r.z)) continue;
       let i =
         n.kind === `super`
           ? e.useSuper(r.dx, r.dz, r.x, r.z)
@@ -1958,26 +2196,36 @@ var ld = class {
     }
     if (t.touchMode) {
       let n = t.sticks,
-        skillPointer = [...t.skillPointers.values()].find((pointer) => pointer.moved),
-        r =
-          n.super.id !== null && n.super.moved && e.superReady
-            ? `super`
-            : n.aim.id !== null && n.aim.moved
-              ? `attack`
-              : null;
-      if (skillPointer && !e.airborne) {
+        skillPointer = null;
+      for (const pointer of t.skillPointers.values()) {
+        if (pointer.moved) {
+          skillPointer = pointer;
+          break;
+        }
+      }
+      const r =
+        n.super.id !== null && n.super.moved && e.superReady
+          ? `super`
+          : n.aim.id !== null && n.aim.moved
+            ? `attack`
+            : null;
+      const guideLocked = e.airborne || !!e.dash || !!e.flicker || !!e.networkDash || !!e.networkFlicker || (e.networkLeapT || 0) > 0 || e.hardCCT > 0 || !!e.burst;
+      if (skillPointer && !guideLocked) {
         const definition = e.def.skills?.[skillPointer.skill - 1];
         const skillAim = definition ? this.stickAim(skillPointer, definition) : null;
         if (skillAim) {
           ad.set(skillAim.x, 0.5, skillAim.z);
-          const skillCharge = skillPointer.chargeStarted
+          const skillCharge = skillPointer.chargeStarted && Number.isFinite(skillPointer.startedAt)
             ? $c((performance.now() - skillPointer.startedAt) / Math.max(100, (definition.chargeTime || 1) * 1000), 0, 1)
             : 0;
           this.updateGuide(definition, `skill`, skillAim.dx, skillAim.dz, skillAim.dist, !1, skillCharge);
         } else this.guide.visible = !1;
-      } else if (r && !e.airborne) {
-        let t = this.stickAim(r === `super` ? n.super : n.aim, e.def[r]);
-        (ad.set(e.x + t.dx * 5, 0.5, e.z + t.dz * 5), this.updateGuide(e.def[r], r, t.dx, t.dz, t.dist, r === `super`));
+      } else if (r && !guideLocked) {
+        const targetAim = this.stickAim(r === `super` ? n.super : n.aim, e.def[r]);
+        if (targetAim) {
+          ad.set(e.x + targetAim.dx * 5, 0.5, e.z + targetAim.dz * 5);
+          this.updateGuide(e.def[r], r, targetAim.dx, targetAim.dz, targetAim.dist, r === `super`);
+        } else this.guide.visible = !1;
       } else (ad.set(e.x, 0.5, e.z), (this.guide.visible = !1));
       return;
     }
@@ -1986,8 +2234,16 @@ var ld = class {
       nd.ray.intersectPlane(id, ad) || ad.set(e.x, 0.5, e.z + 1));
     let r = ad.x - e.x,
       i = ad.z - e.z,
-      a = Math.hypot(r, i) || 1;
-    ((r /= a), (i /= a));
+      a = Math.hypot(r, i);
+    if (!Number.isFinite(r) || !Number.isFinite(i) || !Number.isFinite(a) || a < 1e-8) {
+      r = Math.sin(e.facing);
+      i = Math.cos(e.facing);
+      a = 1;
+      ad.set(e.x + r, 0.5, e.z + i);
+    } else {
+      r /= a;
+      i /= a;
+    }
     let o = t.consumeSuperRelease(),
       s = t.superHeld && e.superReady,
       releasedFire = t.consumeFireRelease();
@@ -1996,21 +2252,46 @@ var ld = class {
       releasedFire !== null && e.attack(r, i, ad.x, ad.z, releasedFire);
     } else if (t.fire && !s) e.attack(r, i, ad.x, ad.z);
     let c = s ? `super` : `attack`;
-    e.airborne ? (this.guide.visible = !1) : this.updateGuide(e.def[c], c, r, i, a, s);
+    e.airborne || e.dash || e.flicker || e.networkDash || e.networkFlicker || e.hardCCT > 0 || e.burst
+      ? (this.guide.visible = !1)
+      : this.updateGuide(e.def[c], c, r, i, a, s);
   }
   stickAim(e, t) {
-    let n = this.player,
-      r = Math.hypot(e.x, e.y) || 1,
-      i = e.x / r,
-      a = e.y / r,
-      o = t.id === `flame`
-        ? e.chargeStarted && Number.isFinite(e.startedAt) && performance.now() - e.startedAt >= (t.chargeTime || 1) * 1000
-          ? t.chargedRange
-          : t.tapRange
-        : t.kind === `lob` || t.kind === `leap` || t.kind === `arrow-shower`
-          ? Math.max(t.kind === `leap` ? 2 : 1, e.mag * t.range)
-          : t.range;
-    return { dx: i, dz: a, dist: o, x: n.x + i * o, z: n.z + a * o };
+    const n = this.player;
+    if (!n || !e || !t || !Number.isFinite(n.x) || !Number.isFinite(n.z) || !Number.isFinite(e.x) || !Number.isFinite(e.y)) return null;
+    const length = Math.hypot(e.x, e.y);
+    const i = length < 1e-8 ? Math.sin(n.facing) : e.x / length;
+    const a = length < 1e-8 ? Math.cos(n.facing) : e.y / length;
+    const mag = Number.isFinite(e.mag) ? $c(e.mag, 0, 1) : 1;
+    let o;
+    if (t.id === `flame`) {
+      o = e.chargeStarted && Number.isFinite(e.startedAt) && performance.now() - e.startedAt >= (t.chargeTime || 1) * 1000 && Number.isFinite(t.chargedRange)
+        ? t.chargedRange
+        : Number.isFinite(t.tapRange)
+          ? t.tapRange
+          : Number.isFinite(t.range)
+            ? t.range
+            : 1;
+    } else if (t.kind === `lob` || t.kind === `leap` || t.kind === `arrow-shower`) {
+      const kindRange = Number.isFinite(t.range) ? t.range : 1;
+      o = Math.max(t.kind === `leap` ? 2 : 1, mag * kindRange);
+    } else if (Number.isFinite(t.range)) {
+      o = t.range;
+    } else if (Number.isFinite(t.distance)) {
+      o = t.distance;
+    } else if (Number.isFinite(t.retreatDistance)) {
+      o = t.retreatDistance;
+    } else {
+      o = 0;
+    }
+    if (!Number.isFinite(o) || o < 0) return null;
+    const result = this.skillAimResult ||= { dx: 0, dz: 0, dist: 0, x: 0, z: 0 };
+    result.dx = i;
+    result.dz = a;
+    result.dist = o;
+    result.x = n.x + i * o;
+    result.z = n.z + a * o;
+    return result;
   }
   autoAim(e) {
     let t = this.player,
@@ -2022,35 +2303,50 @@ var ld = class {
             : 0
         : 0,
       range = e.id === `flame`
-        ? chargeElapsed >= (e.chargeTime || 1) ? e.chargedRange : e.tapRange
-        : e.range,
-      n = range * 1.05,
+        ? chargeElapsed >= (e.chargeTime || 1) && Number.isFinite(e.chargedRange)
+          ? e.chargedRange
+          : Number.isFinite(e.tapRange)
+            ? e.tapRange
+            : Number.isFinite(e.range)
+              ? e.range
+              : 1
+        : Number.isFinite(e.range)
+          ? e.range
+          : Number.isFinite(e.distance)
+            ? e.distance
+            : Number.isFinite(e.retreatDistance)
+              ? e.retreatDistance
+              : Number.isFinite(e.radius)
+                ? e.radius
+                : 1.2,
       r = 0,
       i = 0,
       a = 1 / 0;
+    range = Math.max(0.1, range);
+    const n = range * 1.05;
     if (e.kind === `arrow-shower`) {
       let best = null,
         bestScore = -1;
       for (let target of this.brawlers) {
         if (target === t || !target.alive || target.hidden || target.airborne) continue;
         let distance = sl(t.x, t.z, target.x, target.z);
-        if (distance > e.range) continue;
-        let lead = e.warningDelay + 0.22,
+        if (distance > range) continue;
+        let lead = (e.warningDelay || 0) + 0.22,
           x = target.x + target.vel.x * lead,
           z = target.z + target.vel.y * lead,
           score = 0;
         for (let other of this.brawlers)
-          if (other !== t && other.alive && !other.hidden && !other.airborne && Math.hypot(other.x + other.vel.x * lead - x, other.z + other.vel.y * lead - z) <= e.areaRadius)
+          if (other !== t && other.alive && !other.hidden && !other.airborne && Math.hypot(other.x + other.vel.x * lead - x, other.z + other.vel.y * lead - z) <= (e.areaRadius || e.radius || 1))
             score++;
         score -= distance * 0.035;
         if (score > bestScore) ((bestScore = score), (best = { x, z }));
       }
       if (!best) {
-        let distance = e.range * 0.7;
+        let distance = range * 0.7;
         best = { x: t.x + Math.sin(t.facing) * distance, z: t.z + Math.cos(t.facing) * distance };
       }
       let distance = Math.hypot(best.x - t.x, best.z - t.z) || 1,
-        scale = Math.min(1, e.range / distance);
+        scale = Math.min(1, range / distance);
       best.x = t.x + (best.x - t.x) * scale;
       best.z = t.z + (best.z - t.z) * scale;
       distance = Math.hypot(best.x - t.x, best.z - t.z) || 1;
@@ -2079,7 +2375,16 @@ var ld = class {
       let n = e.kind === `lob` || e.kind === `leap` ? range * 0.6 : range;
       ((r = t.x + Math.sin(t.facing) * n), (i = t.z + Math.cos(t.facing) * n));
     }
-    let o = Math.hypot(r - t.x, i - t.z) || 1;
+    if (!Number.isFinite(r) || !Number.isFinite(i)) {
+      r = t.x + Math.sin(t.facing) * range;
+      i = t.z + Math.cos(t.facing) * range;
+    }
+    let o = Math.hypot(r - t.x, i - t.z);
+    if (!Number.isFinite(o) || o < 1e-8) {
+      r = t.x + Math.sin(t.facing);
+      i = t.z + Math.cos(t.facing);
+      o = 1;
+    }
     return { dx: (r - t.x) / o, dz: (i - t.z) / o, dist: o, x: r, z: i };
   }
   separateBrawlers() {
@@ -2114,6 +2419,7 @@ var ld = class {
       let i = !1;
       if (
         (e && r !== e && r.alive && r.inBush && r.revealT <= 0 && (i = sl(e.x, e.z, r.x, r.z) > 2.4 * concealment),
+        (i = i || (!!e && r !== e && (r.smokeConcealed || r.stealthT > 0))),
         (r.hidden = i),
         r.alive && (r.root.visible = !i),
         n < 8)
@@ -2165,8 +2471,8 @@ var ld = class {
         (this.focus.x = nl(this.focus.x, t, 5.5, e)),
         (this.focus.z = nl(this.focus.z, n, 5.5, e)));
     }
-    let a = this.state === `countdown` ? tl(0.4, 3.2, this.countdownT) : 0,
-      o = $u * r * this.camZoom * (1 + a * 0.75);
+      let a = this.state === `countdown` ? tl(0.4, 3.2, this.countdownT) : 0,
+      o = $u * r * this.camZoom * (this.player?.eagleEyeT > 0 ? 1.2 : 1) * (1 + a * 0.75);
     this.shakeAmp = nl(this.shakeAmp, 0, 9, e);
     let s = this.shakeAmp,
       c = this.elapsed,
@@ -2290,6 +2596,18 @@ var ld = class {
     ((t.t = 0), (t.frames = 0));
     let r = [`ultra`, `high`, `medium`, `low`],
       i = r.indexOf(this.pipeline.qualityName);
+    if (this.pipeline.isWebGPU) {
+      const scale = this.pipeline.performanceScale || 1;
+      if (n < 60 && scale > 0.6) {
+        const nextScale = Math.max(0.6, Math.round((scale - 0.1) * 100) / 100);
+        if (this.pipeline.setPerformanceScale(nextScale))
+          this.hud.toast(`FPS ${Math.round(n)} - resolusi render diturunkan ke ${Math.round(nextScale * 100)}% agar match tetap lancar`);
+      } else if (n > 68 && scale < 1) {
+        const nextScale = Math.min(1, Math.round((scale + 0.05) * 100) / 100);
+        if (this.pipeline.setPerformanceScale(nextScale))
+          this.hud.toast(`Performa stabil - resolusi render dinaikkan ke ${Math.round(nextScale * 100)}%`);
+      }
+    }
     n < (this.userPickedQuality ? 18 : 24) &&
       i < r.length - 1 &&
       (this.setQuality(r[i + 1]),

@@ -29,17 +29,31 @@ function loadClassicScript(path) {
   });
 }
 
+function disposeWebGPURenderer(renderer) {
+  try {
+    renderer?.dispose();
+  } catch (error) {
+    console.warn('[Gelud BakuHantam] WebGPU renderer cleanup failed.', error);
+  }
+}
+
+function useWebGLFallback(canvas, { resetCanvas = false, reason, manual = false } = {}) {
+  if (reason) console.warn(`[Gelud BakuHantam] ${reason}; using WebGL2 fallback.`);
+  if (resetCanvas) canvas.replaceWith(canvas.cloneNode(false));
+  window.__GBH_LIGHTS__ = null;
+  window.__GBH_RENDERER__ = { kind: 'webgl', renderer: null, fallback: !manual };
+}
+
 async function prepareRenderer() {
   const canvas = document.getElementById('game');
-  const requested = new URLSearchParams(location.search).get('renderer');
-  const isMobile = navigator.userAgentData?.mobile ?? /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
-  const rendererKind = chooseRenderer({ requested, isMobile, webgpuAvailable: !!navigator.gpu });
-
-  // Prefer WebGPU on phones for the direct render path; WebGL2 remains the
-  // desktop default while the shadow-depth texture lifecycle is investigated.
+  const requested = new URLSearchParams(window.location.search).get('renderer');
+  const rendererKind = chooseRenderer({ requested, webgpuAvailable: !!window.navigator.gpu });
   if (rendererKind !== 'webgpu') {
-    window.__GBH_RENDERER__ = { kind: 'webgl', renderer: null };
-    return;
+    useWebGLFallback(canvas, {
+      manual: requested === 'webgl',
+      reason: requested === 'webgl' ? null : 'WebGPU tidak tersedia',
+    });
+    return true;
   }
 
   let renderer;
@@ -53,20 +67,21 @@ async function prepareRenderer() {
     });
     await renderer.init();
     if (renderer.backend?.isWebGPUBackend !== true) {
-      renderer.dispose();
-      const replacement = canvas.cloneNode(false);
-      canvas.replaceWith(replacement);
-      window.__GBH_RENDERER__ = { kind: 'webgl', renderer: null };
-      return;
+      disposeWebGPURenderer(renderer);
+      useWebGLFallback(canvas, {
+        resetCanvas: true,
+        reason: 'WebGPU tidak berhasil mengaktifkan backend',
+      });
+      return true;
     }
     window.__GBH_LIGHTS__ = { DirectionalLight, HemisphereLight, PointLight, SpotLight };
     window.__GBH_RENDERER__ = { kind: 'webgpu', renderer };
+    return true;
   } catch (error) {
-    console.warn('[Gelud BakuHantam] WebGPU unavailable; using WebGL2.', error);
-    renderer?.dispose();
-    const replacement = canvas.cloneNode(false);
-    canvas.replaceWith(replacement);
-    window.__GBH_RENDERER__ = { kind: 'webgl', renderer: null };
+    console.warn('[Gelud BakuHantam] WebGPU initialization failed; using WebGL2 fallback.', error);
+    disposeWebGPURenderer(renderer);
+    useWebGLFallback(canvas, { resetCanvas: true });
+    return true;
   }
 }
 

@@ -55,6 +55,7 @@ var ld = class {
         : this.mobileDefaultEffects.bloom && (this.pipeline.toggles.bloom = !1));
     let r = requestedQuality || (n ? `low` : `high`);
     ((this.userPickedQuality = qualityChoice),
+      (this.performanceEffectsReduced = !1),
       (this.pipeline.superSample = $c(parseFloat(this.params.get(`ss`)) || 0, 0, 3)),
       this.lowEndDevice && (this.pipeline.maxPixelsCoarse = 1000000),
       this.pipeline.setQuality(Uc[r] ? r : n ? `low` : `high`));
@@ -67,8 +68,7 @@ var ld = class {
       document.body.classList.toggle(`left-handed`, this.leftHanded),
       (this.lighting = new kl(this.scene, this.pipeline)),
       this.lighting.applyQuality(this.pipeline.quality),
-      (this.mobileDefaultQuality || this.lowEndDevice) && (this.lighting.key.castShadow = !1),
-      this.pipeline.requestShadowUpdate(!0),
+      this.syncPerformanceShadows(),
       (this.audio = new Xu()),
       (this.audio.muted = !!t.muted),
       (this.input = new Gu(this.pipeline.renderer.domElement, document.getElementById(`super`), document.getElementById(`attack-control`))),
@@ -112,7 +112,7 @@ var ld = class {
       (this.timePreset = 0),
       (this.autoTime = t.autoTime !== !1),
       (this.adaptiveT = 0),
-      (this.perf = { t: 0, frames: 0, done: !1 }),
+      (this.perf = { t: 0, frames: 0, done: !1, lowFpsWindows: 0, stableFpsWindows: 0 }),
       (this.frameStats = { calls: 0, triangles: 0, updateMs: 0, renderMs: 0, updateP95Ms: 0, renderP95Ms: 0 }),
       (this.frameTiming = {
         update: new Float32Array(120),
@@ -310,15 +310,32 @@ var ld = class {
       ((this.userPickedQuality = !0),
       (this.mobileDefaultQuality = !1)),
       t && (this.pipeline.performanceScale = 1),
+      t && this.setPerformanceEffectsReduced(!1),
       this.pipeline.setQuality(e),
-      this.perf && ((this.perf.t = 0), (this.perf.frames = 0)),
+      this.perf && ((this.perf.t = 0), (this.perf.frames = 0), (this.perf.lowFpsWindows = 0), (this.perf.stableFpsWindows = 0)),
       this.effects?.setQuality(this.pipeline.quality.tier),
       this.gas?.setQuality(this.pipeline.quality.tier),
       this.lighting.applyQuality(this.pipeline.quality),
-      (this.lighting.key.castShadow = !this.pipeline.isWebGPU && !this.mobileDefaultQuality),
-      this.pipeline.requestShadowUpdate(!0),
+      this.syncPerformanceShadows(),
       this.hud.syncSettings(),
       this.save());
+  }
+  syncPerformanceShadows() {
+    if (!this.lighting || this.pipeline.isWebGPU) return;
+    const enabled = !this.mobileDefaultQuality && !this.lowEndDevice && !this.performanceEffectsReduced;
+    this.lighting.key.castShadow = enabled;
+    this.lighting.lampSlots.forEach((light, index) => {
+      light.castShadow = enabled && this.pipeline.quality.lampShadows && index < this.lighting.lampShadowSlots;
+    });
+    this.pipeline.requestShadowUpdate(!0);
+  }
+  setPerformanceEffectsReduced(e) {
+    const reduced = !!e;
+    if (reduced === this.performanceEffectsReduced) return !1;
+    this.performanceEffectsReduced = reduced;
+    this.effects?.setPerformanceReduced(reduced);
+    this.syncPerformanceShadows();
+    return !0;
   }
   setToggle(e, t) {
     (this.mobileDefaultEffects[e] && (this.mobileDefaultEffects[e] = !1), this.pipeline.setToggle(e, t), this.save());
@@ -1655,7 +1672,6 @@ var ld = class {
       (e.cubes = 0),
       (e.ammo = e.maxAmmo),
       (e.reloadT = 0),
-      (e.superCharge = 0),
       (e.skill2Charge = null),
       (e.skill2Charging = !1),
       (e.skill2ChargeT = 0),
@@ -2323,7 +2339,8 @@ var ld = class {
       i = 0,
       a = 1 / 0;
     range = Math.max(0.1, range);
-    const n = range * 1.05;
+    const n = range * 1.05,
+      playerPriorityRange = n + Math.min(3, Math.max(1.5, range * 0.15));
     if (e.kind === `arrow-shower`) {
       let best = null,
         bestScore = -1;
@@ -2356,14 +2373,21 @@ var ld = class {
       if (o === t || !o.alive || o.hidden || o.airborne) continue;
       let s = sl(t.x, t.z, o.x, o.z);
       if (
-        s > n ||
+        s > playerPriorityRange ||
         s >= a ||
         ((e.kind === `burst` || e.kind === `spread` || e.kind === `melee`) &&
           !this.world.hasLineOfSight(t.x, t.z, o.x, o.z))
       )
         continue;
       let c = e.kind === `lob` ? e.flight + e.fuse * 0.6 : e.kind === `leap` ? e.flight : s / (e.speed || 15);
-      ((a = s), (r = o.x + o.vel.x * c * 0.7), (i = o.z + o.vel.y * c * 0.7));
+      let targetX = o.x + o.vel.x * c * 0.7,
+        targetZ = o.z + o.vel.y * c * 0.7;
+      if (s > n) {
+        let targetDistance = Math.hypot(targetX - t.x, targetZ - t.z) || 1,
+          scale = Math.min(1, n / targetDistance);
+        ((targetX = t.x + (targetX - t.x) * scale), (targetZ = t.z + (targetZ - t.z) * scale));
+      }
+      ((a = s), (r = targetX), (i = targetZ));
     }
     if (a === 1 / 0)
       for (let e of this.combat.boxes) {
@@ -2561,26 +2585,18 @@ var ld = class {
     let e = this.pipeline.renderer,
       t = e.getContext(),
       n = new Uint8Array(4),
-      r = [`ultra`, `high`, `medium`, `low`],
       i = this.lighting.time;
     this.lighting.setTime(21.5);
-    for (let i = 0; i < 3; i++) {
-      let i = [];
-      for (let r = 0; r < 10; r++) {
-        let r = performance.now();
-        (this.lighting.update(0, this.elapsed, this.camera, this.focus, !0),
-          this.pipeline.render(0),
-          e.setRenderTarget(null),
-          t.readPixels(0, 0, 1, 1, t.RGBA, t.UNSIGNED_BYTE, n),
-          i.push(performance.now() - r));
-      }
-      (i.splice(0, 4), i.sort((e, t) => e - t));
-      let a = i[Math.floor(i.length / 2)],
-        o = r.indexOf(this.pipeline.qualityName);
-      if (((this.perf.benchMs = a), a <= 20 || o >= r.length - 1)) break;
-      (this.setQuality(r[o + 1]),
-        this.hud.toast(`${Uc[r[o + 1]].label} quality picked for this GPU - change it any time under ⚙`));
+    let samples = [];
+    for (let sampleIndex = 0; sampleIndex < 10; sampleIndex++) {
+      let startedAt = performance.now();
+      (this.lighting.update(0, this.elapsed, this.camera, this.focus, !0),
+        this.pipeline.render(0),
+        e.setRenderTarget(null),
+        t.readPixels(0, 0, 1, 1, t.RGBA, t.UNSIGNED_BYTE, n),
+        samples.push(performance.now() - startedAt));
     }
+    (samples.splice(0, 4), samples.sort((e, t) => e - t), (this.perf.benchMs = samples[Math.floor(samples.length / 2)] || 0));
     this.lighting.setTime(i);
   }
   adaptQuality(e) {
@@ -2594,24 +2610,17 @@ var ld = class {
       return;
     let n = t.frames / t.t;
     ((t.t = 0), (t.frames = 0));
-    let r = [`ultra`, `high`, `medium`, `low`],
-      i = r.indexOf(this.pipeline.qualityName);
-    if (this.pipeline.isWebGPU) {
-      const scale = this.pipeline.performanceScale || 1;
-      if (n < 60 && scale > 0.6) {
-        const nextScale = Math.max(0.6, Math.round((scale - 0.1) * 100) / 100);
-        if (this.pipeline.setPerformanceScale(nextScale))
-          this.hud.toast(`FPS ${Math.round(n)} - resolusi render diturunkan ke ${Math.round(nextScale * 100)}% agar match tetap lancar`);
-      } else if (n > 68 && scale < 1) {
-        const nextScale = Math.min(1, Math.round((scale + 0.05) * 100) / 100);
-        if (this.pipeline.setPerformanceScale(nextScale))
-          this.hud.toast(`Performa stabil - resolusi render dinaikkan ke ${Math.round(nextScale * 100)}%`);
-      }
+    if (n <= 30 && this.pipeline.qualityName === `high`) {
+      (this.setPerformanceEffectsReduced(!0), this.setQuality(`medium`));
+      return;
     }
-    n < (this.userPickedQuality ? 18 : 24) &&
-      i < r.length - 1 &&
-      (this.setQuality(r[i + 1]),
-      this.hud.toast(`Running at ${Math.round(n)} fps - switched to ${Uc[r[i + 1]].label} quality to keep the match responsive`));
+    if (n < 60) {
+      ((t.lowFpsWindows = (t.lowFpsWindows || 0) + 1), (t.stableFpsWindows = 0));
+      t.lowFpsWindows >= 2 && this.setPerformanceEffectsReduced(!0);
+    } else if (n > 68) {
+      ((t.stableFpsWindows = (t.stableFpsWindows || 0) + 1), (t.lowFpsWindows = 0));
+      t.stableFpsWindows >= 2 && this.setPerformanceEffectsReduced(!1);
+    } else ((t.lowFpsWindows = 0), (t.stableFpsWindows = 0));
   }
   recordFrameTiming(e, t, n) {
     let r = this.frameTiming,

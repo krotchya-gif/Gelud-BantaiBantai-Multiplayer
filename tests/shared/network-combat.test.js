@@ -34,10 +34,12 @@ describe('authoritative super and items', () => {
   it('respawns deathmatch players after the authoritative delay', () => {
     const simulation = new GameSimulation({ mode: 'deathmatch', players: [{ id: 'p1', name: 'A', characterId: 'dusty' }] });
     const player = simulation.state.players.get('p1');
+    player.superCharge = 0.65;
     player.alive = false; player.hp = 0;
     for (let index = 0; index < 160; index += 1) simulation.tick(1 / 30);
     expect(player.alive).toBe(true);
     expect(player.hp).toBe(player.maxHp);
+    expect(player.superCharge).toBe(0.65);
   });
 
   it('stops authoritative projectiles at map blockers', () => {

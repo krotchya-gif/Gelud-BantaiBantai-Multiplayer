@@ -6,8 +6,18 @@ import { CHARACTER_DEFS } from '../shared/data/characters.js';
 const context = vm.createContext({ console, URLSearchParams });
 context.window = context;
 context.performance = performance;
+context.document = { hidden: false };
+context.devicePixelRatio = 3;
+context.matchMedia = query => ({ matches: query === '(pointer: coarse)' });
 const load = (file) => vm.runInContext(readFileSync(new URL(`../public/engine/${file}.js`, import.meta.url), 'utf8'), context, { filename: file });
 load('three-legacy');
+load('render-pipeline');
+const hdPipeline = Object.create(context.Zc.prototype);
+Object.assign(hdPipeline, {
+  superSample: 0, quality: context.Uc.low, performanceScale: 0.6,
+  maxPixelsCoarse: 1_000_000, maxPixelsFine: 5_000_000,
+});
+assert.ok(hdPipeline.getPixelRatio(800, 360) >= 2, 'adaptive scaling preserves at least an HD landscape buffer when the device can render it');
 const original = JSON.parse(JSON.stringify(context.Bc));
 load('character-roster');
 load('world');
@@ -30,6 +40,8 @@ context.MATCH_MODES = { classic: { label: 'Classic', bots: 7, targetKills: 0, ti
 context.window.claude = { hot: { ready() {} } };
 load('main');
 load('combat');
+load('effects');
+load('interfaces');
 const characterIds = Object.keys(context.Bc);
 for (const id of characterIds) {
   assert.deepEqual(JSON.parse(JSON.stringify(context.Bc[id].skills)), CHARACTER_DEFS[id].skills, `${id}: solo and multiplayer skills match`);
@@ -234,13 +246,126 @@ assert.equal(botRoster.length, 15, 'solo Deathmatch roster fills all bot slots')
 assert.deepEqual(Array.from(context.createBalancedBotRoster(characterIds, 15, 0x13579bdf)), botRoster, 'same seed keeps bot roster deterministic');
 for (const characterId of characterIds) {
   assert.ok(botRoster.filter(id => id === characterId).length <= 2, `${characterId}: at most two Deathmatch bots`);
+  assert.ok(botRoster.includes(characterId), `${characterId}: every Deathmatch bot lineup includes this character before repeats`);
 }
 for (let seed = -32; seed <= 32; seed += 1) {
   const seededRoster = context.createBalancedBotRoster(characterIds, 15, seed);
   for (const characterId of characterIds) {
     assert.ok(seededRoster.filter(id => id === characterId).length <= 2, `${characterId}: roster seed ${seed} stays under the bot cap`);
+    assert.ok(seededRoster.includes(characterId), `${characterId}: roster seed ${seed} includes every character before repeats`);
   }
 }
+
+assert.equal(context.getBotTargetScore('deathmatch', 8, 0.1, false), 8, 'Deathmatch bot targeting uses distance only');
+assert.equal(context.getBotTargetScore('deathmatch', 8, 0.9, true), 8, 'Deathmatch bots do not favor low-health or recent-attacker targets');
+assert.ok(
+  context.getBotTargetScore('classic', 8, 1, true) < context.getBotTargetScore('classic', 8, 1, false),
+  'non-Deathmatch bot aggression keeps its existing retaliation preference',
+);
+
+const aimGame = Object.create(context.ld.prototype);
+const aimPlayer = { x: 0, z: 0, facing: 0 };
+const attackRange = context.Bc.dusty.attack.range;
+const nearbyOpponent = {
+  x: 0, z: attackRange * 1.05 + 1, alive: true, hidden: false, airborne: false,
+  vel: { x: 0, y: 0 },
+};
+const aimBox = { x: 3, z: 0, alive: true };
+Object.assign(aimGame, {
+  player: aimPlayer,
+  brawlers: [aimPlayer, nearbyOpponent],
+  combat: { boxes: [aimBox] },
+  world: { hasLineOfSight: () => true },
+});
+let targetAim = aimGame.autoAim(context.Bc.dusty.attack);
+assert.ok(targetAim.dz > 0.98, 'auto-aim keeps a nearby opponent ahead of an in-range item box');
+nearbyOpponent.z = attackRange * 1.05 + Math.min(3, Math.max(1.5, attackRange * 0.15)) + 1;
+targetAim = aimGame.autoAim(context.Bc.dusty.attack);
+assert.ok(targetAim.dx > 0.98, 'auto-aim falls back to an item box when no opponent is nearby');
+
+function makeAdaptiveQualityHarness(qualityName, userPickedQuality) {
+  const calls = { quality: [], effects: [], scale: [] };
+  const game = Object.create(context.ld.prototype);
+  Object.assign(game, {
+    state: 'playing', paused: false, userPickedQuality,
+    pipeline: {
+      qualityName, performanceScale: 1, isWebGPU: true,
+      setPerformanceScale(scale) { calls.scale.push(scale); return true; },
+    },
+    perf: { t: 0, frames: 0, lowFpsWindows: 0, stableFpsWindows: 0 },
+    setQuality(nextQuality) { calls.quality.push(nextQuality); this.pipeline.qualityName = nextQuality; },
+    setPerformanceEffectsReduced(reduced) { calls.effects.push(reduced); },
+  });
+  return { game, calls };
+}
+function feedAdaptiveWindow(game, fps, seconds) {
+  game.perf.t = seconds - 1 / fps;
+  game.perf.frames = Math.round(fps * seconds) - 1;
+  game.adaptQuality(1 / fps);
+}
+const lowQualityAdaptive = makeAdaptiveQualityHarness('low', false);
+feedAdaptiveWindow(lowQualityAdaptive.game, 59, 6);
+assert.deepEqual(lowQualityAdaptive.calls, { quality: [], effects: [], scale: [] }, 'one short low-FPS window does not alter quality or resolution');
+feedAdaptiveWindow(lowQualityAdaptive.game, 59, 6);
+assert.deepEqual(lowQualityAdaptive.calls, { quality: [], effects: [true], scale: [] }, 'sustained low FPS reduces optional effects without lowering Low resolution');
+feedAdaptiveWindow(lowQualityAdaptive.game, 70, 6);
+feedAdaptiveWindow(lowQualityAdaptive.game, 70, 6);
+assert.deepEqual(lowQualityAdaptive.calls.effects, [true, false], 'effects restore after sustained stable FPS');
+const highQualityAdaptive = makeAdaptiveQualityHarness('high', true);
+feedAdaptiveWindow(highQualityAdaptive.game, 30, 3);
+assert.deepEqual(highQualityAdaptive.calls, { quality: ['medium'], effects: [true], scale: [] }, 'High switches to Medium at 30 FPS without dynamic resolution drops');
+
+const effectSettingHarness = Object.create(context.ld.prototype);
+const performanceReductions = [];
+Object.assign(effectSettingHarness, {
+  performanceEffectsReduced: false,
+  mobileDefaultQuality: false,
+  lowEndDevice: false,
+  pipeline: { isWebGPU: false, quality: { lampShadows: true }, requestShadowUpdate() {} },
+  lighting: { key: {}, lampSlots: [{}, {}], lampShadowSlots: 1 },
+  effects: { setPerformanceReduced(reduced) { performanceReductions.push(reduced); } },
+});
+effectSettingHarness.setPerformanceEffectsReduced(true);
+assert.equal(effectSettingHarness.lighting.key.castShadow, false, 'adaptive pressure disables the directional shadow');
+assert.deepEqual(effectSettingHarness.lighting.lampSlots.map(light => light.castShadow), [false, false], 'adaptive pressure disables lamp shadows');
+effectSettingHarness.setPerformanceEffectsReduced(false);
+assert.equal(effectSettingHarness.lighting.key.castShadow, true, 'stable performance restores the directional shadow');
+assert.deepEqual(effectSettingHarness.lighting.lampSlots.map(light => light.castShadow), [true, false], 'stable performance restores only configured lamp shadows');
+assert.deepEqual(performanceReductions, [true, false], 'particle effects follow the adaptive performance mode');
+
+const particleQualityCalls = [];
+const particleEffectHarness = Object.create(context.Nu.prototype);
+Object.assign(particleEffectHarness, {
+  qualityTier: 0, performanceReduced: false, debrisCap: 140, debrisActiveCap: 140, debrisCursor: 0,
+  glow: { setQuality(scale) { particleQualityCalls.push(['glow', scale]); } },
+  smoke: { setQuality(scale) { particleQualityCalls.push(['smoke', scale]); } },
+  debrisData: Array.from({ length: 140 }, () => ({ life: 1 })),
+  debrisMesh: { setMatrixAt() {}, instanceMatrix: {} },
+});
+particleEffectHarness.setQuality(0);
+const baseDebrisCap = particleEffectHarness.debrisActiveCap;
+particleEffectHarness.setPerformanceReduced(true);
+assert.ok(particleEffectHarness.glow && particleEffectHarness.performanceReduced, 'adaptive particle mode is active');
+assert.ok(particleEffectHarness.debrisActiveCap < baseDebrisCap, 'adaptive particle mode lowers the debris cap');
+assert.equal(particleQualityCalls.at(-2)[1], 0.275, 'adaptive particle mode halves the Low glow budget');
+particleEffectHarness.setPerformanceReduced(false);
+assert.equal(particleEffectHarness.debrisActiveCap, baseDebrisCap, 'particle capacity restores with stable performance');
+
+const soloRespawnTarget = {
+  alive: false, deadT: 5, hp: 0, maxHp: context.Bc.dusty.hp, def: context.Bc.dusty,
+  cubes: 4, ammo: 0, maxAmmo: 3, superCharge: 0.73,
+  slowEffects: new Map(), bleeds: new Map(), burns: new Map(), sukunaBasicHits: new Map(), scatterHits: new Map(),
+  vel: { set() {} }, knock: { set() {} }, superRing: { material: { opacity: 1 }, visible: true },
+  root: { position: { set() {} }, rotation: { set() {} }, scale: { setScalar() {} }, visible: false },
+};
+const soloRespawnGame = Object.create(context.ld.prototype);
+Object.assign(soloRespawnGame, {
+  modeName: 'deathmatch', state: 'playing', matchTime: 10, elapsed: 10,
+  mode: { spawnProtection: 2 }, world: { spawns: [[0, 0]], center: value => value, isBushAt: () => false },
+  brawlers: [soloRespawnTarget], brains: [],
+});
+soloRespawnGame.respawnBrawler(soloRespawnTarget);
+assert.equal(soloRespawnTarget.superCharge, 0.73, 'solo Deathmatch respawn preserves Super charge');
 
 const soloBrawler = Object.create(context.fu.prototype);
 Object.assign(soloBrawler, {
@@ -320,7 +445,7 @@ networkTrapClient.updateTimedTraps(1);
 assert.equal(networkTrapClient.timedTraps.size, 0, 'multiplayer clients never create local authoritative traps');
 assert.equal(localNetworkTrapRandomCalls, 0, 'multiplayer clients only receive trap selection from the server');
 
-// A manual Ultra selection must recover when the renderer falls to single-digit FPS.
+// Automatic adaptation keeps user-selected Ultra and only applies the requested High threshold.
 context.document = { hidden: false };
 const qualityChanges = [];
 const qualityGame = Object.create(context.ld.prototype);
@@ -331,7 +456,7 @@ Object.assign(qualityGame, {
   setQuality(name) { qualityChanges.push(name); this.pipeline.qualityName = name; },
 });
 for (let frame = 0; frame < 15; frame++) qualityGame.adaptQuality(0.2);
-assert.deepEqual(qualityChanges, ['high'], 'manual Ultra recovers from sustained 5 FPS');
+assert.deepEqual(qualityChanges, [], 'manual Ultra is not force-downgraded by the generic low-FPS fallback');
 assert.ok(context.Uc.high.shadowMap < 4096 && context.Uc.ultra.lampMap < 2048, 'High/Ultra cap expensive shadow targets');
 const webGpuShadowWrites = [];
 const webGpuPoolLightCounts = [];
@@ -370,12 +495,13 @@ Object.assign(adaptiveScaleGame, {
   hud: { toast() {} },
   setQuality() { throw new Error('Low is the final quality tier'); },
 });
-for (let frame = 0; frame < 178; frame++) adaptiveScaleGame.adaptQuality(1 / 59);
-assert.deepEqual(adaptiveScaleChanges, [0.9], 'WebGPU lowers render resolution at sustained 59 FPS');
+for (let frame = 0; frame < 356; frame++) adaptiveScaleGame.adaptQuality(1 / 59);
+assert.deepEqual(adaptiveScaleChanges, [], 'WebGPU does not lower render resolution at sustained 59 FPS');
+assert.equal(adaptiveScaleGame.performanceEffectsReduced, true, 'sustained low FPS reduces optional effects on Low');
 adaptiveScaleGame.perf = { t: 0, frames: 0 };
-adaptiveScaleGame.pipeline.performanceScale = 0.9;
-for (let frame = 0; frame < 271; frame++) adaptiveScaleGame.adaptQuality(1 / 90);
-assert.deepEqual(adaptiveScaleChanges, [0.9, 0.95], 'WebGPU restores render resolution gradually after sustained headroom');
+for (let frame = 0; frame < 542; frame++) adaptiveScaleGame.adaptQuality(1 / 90);
+assert.deepEqual(adaptiveScaleChanges, [], 'WebGPU keeps render resolution stable after recovery');
+assert.equal(adaptiveScaleGame.performanceEffectsReduced, false, 'optional effects restore after sustained headroom');
 
 // The actual WebGL composer must keep GTAO at half buffer resolution after
 // creation and resize; a constructor-only size check misses composer resizes.
@@ -393,6 +519,7 @@ const fakeRenderer = {
 };
 context.window.__GBH_RENDERER__ = { kind: 'webgl', renderer: fakeRenderer };
 context.window.devicePixelRatio = 2;
+context.matchMedia = () => ({ matches: false });
 load('render-pipeline');
 const qualityPipeline = new context.Zc(null, new context.vt(), new context.hi(60, 4 / 3, 1, 260));
 qualityPipeline.setQuality('ultra');
@@ -413,7 +540,7 @@ assert.equal(pipelineBuilds, 1, 'changing AO or MSAA configuration rebuilds the 
 const fullPixelRatio = qualityPipeline.getPixelRatio(1000, 700);
 qualityPipeline.setPerformanceScale(0.8);
 assert.equal(qualityPipeline.performanceScale, 0.8, 'manual render scale is clamped and stored');
-assert.ok(qualityPipeline.getPixelRatio(1000, 700) < fullPixelRatio, 'adaptive render scale reduces drawing resolution');
+assert.equal(qualityPipeline.getPixelRatio(1000, 700), fullPixelRatio, 'render scale cannot push a supported viewport below its HD floor');
 qualityPipeline.setPerformanceScale(1);
 context.window.__GBH_RENDERER__ = undefined;
 
@@ -737,4 +864,4 @@ for (const id of ['dusty', 'fuse', 'volt']) {
     assert.deepEqual(after, before, `${id}: ${slot} gameplay preserved`);
   }
 }
-console.log('PASS: ten gameplay rigs + two design rigs, all 20 solo active-skill paths, solo domains/barrier/parry/Eagle Eye, Gojo/Sukuna Super visuals, bot roster, items/Flicker/traps, multiplayer visual lifecycle, quality fallback, material ownership, silhouettes, and combat tuning.');
+console.log('PASS: ten gameplay rigs + two design rigs, solo skills/domains/barrier/parry, Super respawn retention, bot targeting/roster, auto-aim priority, adaptive effects and HD resolution floor, items/Flicker/traps, multiplayer visuals, material ownership, silhouettes, and combat tuning.');

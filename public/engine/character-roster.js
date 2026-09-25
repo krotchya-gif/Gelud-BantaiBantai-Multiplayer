@@ -13,6 +13,15 @@ function createBalancedBotRoster(characterIds, count, seed = 0) {
   };
   const counts = new Map();
   const roster = [];
+  const firstWave = [...ids];
+  for (let index = firstWave.length - 1; index > 0; index -= 1) {
+    const swapIndex = Math.floor(nextRandom() * (index + 1));
+    [firstWave[index], firstWave[swapIndex]] = [firstWave[swapIndex], firstWave[index]];
+  }
+  for (const characterId of firstWave.slice(0, Math.min(count, ids.length))) {
+    roster.push(characterId);
+    counts.set(characterId, 1);
+  }
   while (roster.length < count) {
     const available = ids.filter((id) => (counts.get(id) || 0) < limit);
     const characterId = available[Math.floor(nextRandom() * available.length)];

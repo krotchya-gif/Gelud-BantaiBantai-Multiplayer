@@ -18,7 +18,7 @@ Status per 25 September 2026: **dua skill aktif untuk seluruh 10 karakter sudah 
 5. **Peta.** Bedakan cover yang bisa dihancurkan, rintangan permanen, dan batas arena. Efek penghancuran hanya mengenai cover yang ditandai bisa dihancurkan. Tembakan penembus cover tidak keluar dari batas arena. Wall stun terjadi hanya setelah gerak knockback benar-benar berbenturan dengan collision; satu cast dapat memicu satu wall stun per target.
 6. **Aksi jaringan.** Setiap aktivasi, release, dan recast skill punya `actionId`. Simulasi menyimpan sekumpulan ID aksi terbaru per pemain agar kiriman ulang atau paket terlambat tidak menjalankan skill dua kali. Input gerak tetap memakai `seq`; `actionId` tidak menggantikannya.
 7. **Resource.** Ello dan Syafiah tidak memakai ammo. Tidak ada meter Focus baru; bar di bawah HP tetap menampilkan Super. Item ammo mengikuti aturan saat ini: pada karakter tanpa ammo, item tersebut mengisi 20% Super. Gojo menampilkan satu indikator Barrier terpisah.
-8. **Super charge.** Delapan karakter lama memakai ambang charge yang ada saat ini. Gojo mulai di **3.800** dan Sukuna **4.000** sebagai angka uji. Semua charge dihitung oleh simulasi, bukan dari animasi client.
+8. **Super charge.** Delapan karakter lama memakai ambang charge yang ada saat ini. Gojo mulai di **3.800** dan Sukuna **4.000** sebagai angka uji. Semua charge dihitung oleh simulasi, bukan dari animasi client. Pada Deathmatch solo dan authoritative multiplayer, kematian/respawn tidak menghapus charge; charge dikonsumsi ketika Super berhasil digunakan.
 
 ## Kontrol
 

@@ -1,7 +1,10 @@
 var  Ru = 9,
   zu = 4.5,
-  Bu = 2.4,
-  Vu = class {
+  Bu = 2.4;
+function getBotTargetScore(mode, distance, healthRatio, retaliating) {
+  return mode === `deathmatch` ? distance : distance * (0.62 + healthRatio * 0.38) * (retaliating ? 0.7 : 1);
+}
+var Vu = class {
     constructor(e, t) {
       ((this.game = e),
         (this.b = t),
@@ -67,7 +70,7 @@ var  Ru = 9,
             )
               continue;
           }
-        let score = r * (0.62 + (n.hp / n.maxHp) * 0.38) * (i ? 0.7 : 1),
+        let score = getBotTargetScore(t.modeName, r, n.hp / n.maxHp, i),
           targetVisible = this.canSee(n, r) ||
             ((this.spawnHuntT > 0 || t.modeName === `deathmatch` || n === this.target) && !n.inBush && !n.smokeConcealed && !(n.stealthT > 0));
         score < bestScore && targetVisible && ((a = n), (o = r), (bestScore = score));

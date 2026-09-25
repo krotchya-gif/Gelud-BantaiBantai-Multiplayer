@@ -103,9 +103,15 @@ var Yc = {
       ((this.shadowUpdateRequested = !0), e && (this.shadowLightsDirty = !0));
     }
     getPixelRatio(e, t) {
-      let n = Math.max(0.25, (this.superSample || Math.min(window.devicePixelRatio || 1, this.quality.dpr)) * this.performanceScale),
+      const width = Math.max(1, e),
+        height = Math.max(1, t),
+        deviceRatio = Math.max(0.25, window.devicePixelRatio || 1),
+        hdFloor = Math.min(deviceRatio, Math.max(1280 / width, 720 / height));
+      let n = Math.max(hdFloor, (this.superSample || Math.min(deviceRatio, this.quality.dpr)) * this.performanceScale),
         r = window.matchMedia && window.matchMedia(`(pointer: coarse)`).matches ? this.maxPixelsCoarse : this.maxPixelsFine;
-      return (n *= Math.min(1, Math.sqrt(r / Math.max(1, e * t * n * n)))), n;
+      const pixelBudget = Math.max(r, width * height * hdFloor * hdFloor);
+      n *= Math.min(1, Math.sqrt(pixelBudget / Math.max(1, width * height * n * n)));
+      return Math.max(hdFloor, n);
     }
     setPerformanceScale(e) {
       let n = $c(Number(e) || 1, 0.6, 1);

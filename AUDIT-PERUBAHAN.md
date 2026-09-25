@@ -1,6 +1,7 @@
 # Laporan Audit dan Perubahan
 
-**Tanggal:** 25 September 2026
+- **Audit awal:** 25 September 2026
+- **Dokumentasi diselaraskan:** 26 September 2026
 **Status:** Perbaikan telah diimplementasikan, dibuild, dan diverifikasi. Rincian pengujian di bawah mengikuti kondisi codebase saat ini.
 
 ## 0. Acuan resmi Gojo dan Sukuna
@@ -25,7 +26,7 @@ Dismantle menjangkau 10 unit, memberi 600 damage dan dapat mengenai hingga tiga 
 
 Temuan di bawah berasal dari snapshot audit awal dan tidak semuanya merupakan bug yang sudah direproduksi. Status perbaikannya diringkas pada bagian 3–5. Diagnosis performa WebGPU masih berdasarkan alur kode; tidak ada profiling GPU atau benchmark fisik Poco F6.
 
-Status saat ini: mismatch durasi Blue sudah disamakan; WebGPU menjadi renderer utama dengan WebGL2 sebagai fallback; struktur light/shadow WebGPU distabilkan dan adaptive render scale dimulai di bawah 60 FPS. Perubahan prediction/snapshot/solo combat memiliki coverage otomatis yang lulus, tetapi belum ada validasi perangkat fisik atau multiplayer dua perangkat.
+Status saat ini: mismatch durasi Blue sudah disamakan; WebGPU menjadi renderer utama dengan WebGL2 sebagai fallback; struktur light/shadow WebGPU distabilkan. Perubahan 25 September menetapkan floor render HD, memakai hysteresis sebelum mengurangi efek, hanya menurunkan preset High ke Medium pada rata-rata 30 FPS atau kurang, dan tidak mengubah resolusi otomatis. Auto-aim memprioritaskan fighter daripada kotak item, bot Deathmatch menyerang fighter terdekat termasuk bot lain, lineup mengisi roster sebelum mengulang karakter, dan Super charge bertahan saat respawn. Coverage otomatis untuk perubahan tersebut lulus; validasi perangkat fisik dan multiplayer dua perangkat belum dilakukan ulang.
 
 ### 2.1 Paritas Blue Gojo
 
@@ -73,7 +74,7 @@ Status saat ini: mismatch durasi Blue sudah disamakan; WebGPU menjadi renderer u
 - Suite/verifier yang dijalankan sekarang mencakup Blue 2,4 detik, cooldown Barrier, durasi/domain snapshot, charged Fuga release, cover, sticky attach, airborne, Overcharge, action lock, dan visual lifecycle.
 - Sebagian verifier masih memakai harness yang menyiapkan kondisi collision/action secara langsung; hasilnya bukan pengganti end-to-end gameplay.
 - Coverage Fuga tap/cancel, Barrier terhadap banyak damage instance versus hazard tanpa attacker, dan kombinasi multiplayer lintas perangkat belum diklaim lengkap.
-- README, AGENTS, dan laporan ini kini menyebut default WebGPU, fallback WebGL2, batasan WebGPU, serta hasil build/test yang sama.
+- README, AGENTS, dan laporan ini mencatat default WebGPU, fallback WebGL2, batasan WebGPU, serta hasil build/test. Nilai verifikasi lama di bagian 4 diperbarui ke run terbaru yang tercatat.
 
 ## 3. Perbaikan yang kini ada di working tree
 
@@ -83,27 +84,31 @@ Status saat ini: mismatch durasi Blue sudah disamakan; WebGPU menjadi renderer u
 - `src/bootstrap.js` mencoba menginisialisasi WebGPU lebih dulu. Jika API/adapter tidak tersedia atau inisialisasi/backend gagal, engine tetap dimuat memakai WebGL2. Setelah percobaan WebGPU gagal, canvas diganti sebelum fallback agar context gagal tidak dipakai ulang.
 - HUD menunjukkan `WebGPU`, `WebGL2 (fallback)`, atau `WebGL2 (manual)` sesuai jalur yang aktif.
 - Pada WebGPU, jumlah pool light dipatok empat dan dynamic shadow directional/lampu dimatikan pada semua tier. Ini menjaga topologi renderer tetap stabil selama pergantian quality.
-- WebGPU memakai adaptive render scale 60–100%: turun saat rata-rata FPS di bawah 60 dan pulih bertahap setelah di atas 68. Quality manual tetap bisa dipilih sampai Ultra.
-- Perubahan ini menargetkan hitch dari pergantian struktur light/shadow dan mengurangi beban GPU melalui skala resolusi. Penyebab freeze masih perlu dikonfirmasi dengan profiling pada perangkat yang mengalaminya.
+- Render buffer memiliki floor HD (1280 × 720) jika resolusi native perangkat mendukungnya; FPS singkat di bawah 60 tidak langsung mengubah resolusi.
+- Setelah dua jendela pengukuran berturut-turut di bawah 60, efek partikel dikurangi dan dynamic shadow WebGL dimatikan sementara. Efek kembali setelah dua jendela di atas 68. Hanya preset High yang berpindah ke Medium saat rata-rata FPS mencapai 30 atau kurang; Low tidak diturunkan lagi. Adaptasi ini tidak mengirim toast.
+- Beban performa dikurangi melalui efek tambahan sebelum resolusi; struktur light/shadow WebGPU tetap stabil. Dampak pada Poco F6 tetap perlu dikonfirmasi melalui profiling dan pengukuran perangkat.
 
 ### 3.2 Gameplay, roster, dan sinkronisasi
 
 - Durasi Blue Gojo disamakan menjadi 2,4 detik pada data shared dan solo; verifier serta regression test mengikuti durasi yang sama.
 - Prediction client dan snapshot server membawa/mencerminkan state dash, airborne/hard CC, Flicker, Overcharge, timer terkait, serta status skill yang diperlukan.
 - Interpolasi projectile sticky mengikuti target saat menempel dan tidak lagi mengekstrapolasi projectile tersebut seolah bergerak bebas.
+- Auto-aim solo menargetkan fighter dalam jangkauan akuisisi serangan lebih dahulu; kotak item hanya dipilih bila tidak ada fighter terdekat. Bot Deathmatch memilih lawan hidup terdekat, termasuk bot, sementara lineup seeded mengisi semua karakter sebelum pengulangan. Batas solo Deathmatch tetap maksimal dua bot per karakter.
+- Super charge tidak dihapus ketika karakter mati/respawn pada Deathmatch; charge dikonsumsi saat Super digunakan.
+- Notifikasi toast otomatis untuk perubahan performa dihapus; kondisi render ditangani tanpa menghalangi HUD mobile.
 - Working tree juga mencakup perubahan solo combat, UI skill, map collision, dan coverage regression. Perubahan yang sudah ada sebelum sesi ini tidak di-reset.
 
 ## 4. Verifikasi terbaru
 
-- `npm test -- --run`: **25 file, 132 test lulus**.
+- `npm test -- --run`: **25 file, 134 test lulus**.
 - `npm run test:characters`: **lulus**, mencakup sepuluh rig gameplay, dua design rig, 20 jalur skill solo, dan pemeriksaan renderer/visual yang dicantumkan verifier.
-- `npm run build`: **lulus**, menghasilkan 27 file dengan total 2.835.989 byte. Bundle WebGPU Three.js 781,37 kB (212,55 kB gzip), bundle utama 39,52 kB (13,90 kB gzip), dan Character Studio 7,47 kB (3,29 kB gzip). Vite tetap memberi peringatan chunk di atas 500 kB.
+- `npm run build`: **lulus**, menghasilkan 27 file dengan total 2.837.682 byte. Bundle WebGPU Three.js 781,37 kB (212,55 kB gzip), bundle utama 39,52 kB (13,90 kB gzip), dan Character Studio 7,47 kB (3,29 kB gzip). Vite tetap memberi peringatan chunk di atas 500 kB.
 - `git diff --check`: lulus.
-- Smoke test browser lokal melaporkan WebGPU aktif. Pergantian Low → Medium → High ketika match solo berjalan tetap responsif pada 60 FPS di browser tersebut. Ini bukan benchmark perangkat Poco F6.
+- Smoke test browser lokal yang tercatat sebelumnya melaporkan WebGPU aktif dan pergantian Low → Medium → High responsif pada 60 FPS. Smoke test tersebut mendahului kebijakan render terbaru; perilaku terbaru belum diuji ulang di browser atau Poco F6.
 
 ## 5. Batas verifikasi dan tindak lanjut
 
 - Belum ada profiling GPU atau pengukuran fisik pada Poco F6; peningkatan FPS pada perangkat itu belum dapat diklaim.
 - Belum dilakukan uji multiplayer dua perangkat, sentuhan pada ponsel fisik, soak test, atau balance playtest.
 - Browser smoke test mencatat warning `THREE.WARNING: Multiple instances of Three.js being imported.` saat WebGPU module dan engine classic dimuat bersama. Menu/match tetap berjalan; dampaknya terhadap performa belum diukur.
-- Tidak ada commit atau push. `AUDIT-PERUBAHAN.md` dan `tests/shared/roster-skills.test.js` masih file baru di working tree.
+- Tidak ada commit atau push. Perubahan tetap berada di working tree dan perubahan pengguna yang sudah ada dipertahankan.

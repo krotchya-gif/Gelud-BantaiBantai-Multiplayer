@@ -28,6 +28,8 @@ var Nu = class {
         (this.flashPool = []),
         (this.debrisCap = 140),
         (this.debrisActiveCap = this.debrisCap),
+        (this.qualityTier = e.pipeline.quality.tier),
+        (this.performanceReduced = !1),
         (this.debrisMesh = new Yn(new fr(1, 1, 1), new Nr({ color: 16777215, roughness: 0.85 }), this.debrisCap)),
         (this.debrisMesh.castShadow = !0),
         (this.debrisMesh.receiveShadow = !0),
@@ -78,14 +80,23 @@ var Nu = class {
       ((this.ringCursor = 0), this.setQuality(e.pipeline.quality.tier), this.buildFireflies());
     }
     setQuality(e) {
+      this.qualityTier = e;
       let t = [0.55, 0.75, 0.9, 1][e] ?? 1;
-      (this.glow.setQuality(t), this.smoke.setQuality(t));
+      let particleScale = t * (this.performanceReduced ? 0.5 : 1);
+      (this.glow.setQuality(particleScale), this.smoke.setQuality(particleScale));
       let n = Math.max(24, Math.round(this.debrisCap * t));
+      this.performanceReduced && (n = Math.max(12, Math.round(n * 0.5)));
       if (n === this.debrisActiveCap) return;
       if (n < this.debrisActiveCap)
         for (let e = n; e < this.debrisActiveCap; e++)
           ((this.debrisData[e].life = 0), this.debrisMesh.setMatrixAt(e, Kl));
       ((this.debrisActiveCap = n), (this.debrisCursor %= n), (this.debrisMesh.instanceMatrix.needsUpdate = !0));
+    }
+    setPerformanceReduced(e) {
+      let reduced = !!e;
+      if (reduced === this.performanceReduced) return !1;
+      ((this.performanceReduced = reduced), this.setQuality(this.qualityTier));
+      return !0;
     }
     buildFireflies() {
       let e = this.game.world,

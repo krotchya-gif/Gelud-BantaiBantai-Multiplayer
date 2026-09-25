@@ -231,7 +231,7 @@ export class GameSimulation {
       this.state.nextSpawnIndex += 1;
       player.x = point.x; player.z = point.z; player.hp = player.maxHp; player.alive = true;
       player.spawnProtectionT = this.state.match.spawnProtection; player.deadT = 0; player.heldItems = [null, null]; player.heldItem = null; player.shieldT = 0; player.speedBoostT = 0; player.itemSpeedT = 0; player.slowT = 0;
-      player.superCharge = 0; player.ammo = characterUsesAmmo(player.characterId) ? characterMaxAmmo(player.characterId) : 0; player.reloadT = 0; player.attackCooldown = 0; player.burstT = 0; player.burstState = null; player.comboStep = 0; player.comboResetT = 0; player.iaidoState = null; player.iaidoEmpowered = false; player.flickerInvulnT = 0; player.flickerState = null;
+      player.ammo = characterUsesAmmo(player.characterId) ? characterMaxAmmo(player.characterId) : 0; player.reloadT = 0; player.attackCooldown = 0; player.burstT = 0; player.burstState = null; player.comboStep = 0; player.comboResetT = 0; player.iaidoState = null; player.iaidoEmpowered = false; player.flickerInvulnT = 0; player.flickerState = null;
       player.velX = 0; player.velZ = 0; player.input.moveX = 0; player.input.moveZ = 0; player.lastCombat = this.state.match.elapsed;
       player.chargeStartedAt = null;
       player.skill2Charge = null;

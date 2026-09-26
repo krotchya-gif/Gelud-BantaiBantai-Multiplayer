@@ -1,6 +1,7 @@
 import './pwa.js';
 import './multiplayer/lobby.js';
 import { chooseRenderer } from './renderer-selection.js';
+import { installThreeGlobals, THREE } from './three-global-runtime.js';
 
 const legacyScripts = [
   'engine/three-legacy.js',
@@ -44,6 +45,22 @@ function useWebGLFallback(canvas, { resetCanvas = false, reason, manual = false 
   window.__GBH_RENDERER__ = { kind: 'webgl', renderer: null, fallback: !manual };
 }
 
+function watchWebGPUDevice(renderer) {
+  const device = renderer?.backend?.device;
+  device?.addEventListener?.('uncapturederror', (event) => {
+    console.error('[Gelud BakuHantam] Uncaptured WebGPU error.', event.error || event);
+    window.__GBH_RENDERER_LAST_ERROR__ = event.error || event;
+  });
+  device?.lost?.then((info) => {
+    if (info?.reason === 'destroyed') return;
+    const error = new Error(`WebGPU device lost${info?.message ? `: ${info.message}` : ''}`);
+    window.__GBH_RENDERER_FAILURE__ = error;
+    window.dispatchEvent(new CustomEvent('gbh:renderer-failure', { detail: error }));
+  }).catch((error) => {
+    console.error('[Gelud BakuHantam] Could not observe WebGPU device status.', error);
+  });
+}
+
 async function prepareRenderer() {
   const canvas = document.getElementById('game');
   const requested = new URLSearchParams(window.location.search).get('renderer');
@@ -58,7 +75,7 @@ async function prepareRenderer() {
 
   let renderer;
   try {
-    const { WebGPURenderer, DirectionalLight, HemisphereLight, PointLight, SpotLight } = await import('three/webgpu');
+    const { default: WebGPURenderer } = await import('three/src/renderers/webgpu/WebGPURenderer.js');
     renderer = new WebGPURenderer({
       canvas,
       antialias: false,
@@ -74,8 +91,14 @@ async function prepareRenderer() {
       });
       return true;
     }
-    window.__GBH_LIGHTS__ = { DirectionalLight, HemisphereLight, PointLight, SpotLight };
+    window.__GBH_LIGHTS__ = {
+      DirectionalLight: THREE.DirectionalLight,
+      HemisphereLight: THREE.HemisphereLight,
+      PointLight: THREE.PointLight,
+      SpotLight: THREE.SpotLight,
+    };
     window.__GBH_RENDERER__ = { kind: 'webgpu', renderer };
+    watchWebGPUDevice(renderer);
     return true;
   } catch (error) {
     console.warn('[Gelud BakuHantam] WebGPU initialization failed; using WebGL2 fallback.', error);
@@ -86,6 +109,7 @@ async function prepareRenderer() {
 }
 
 try {
+  installThreeGlobals(window);
   await prepareRenderer();
   await Promise.all(legacyScripts.map(loadClassicScript));
 } catch (error) {

@@ -88,59 +88,131 @@
     <div id="mobile-actions">
       <button id="fullscreen-btn" aria-label="Enter fullscreen landscape" title="Fullscreen"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 3H3v5M16 3h5v5M8 21H3v-5M16 21h5v-5" /></svg></button>
       <button id="pause-btn" aria-label="Pause game" title="Pause"><svg class="pause-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" aria-hidden="true"><path d="M9 5v14M15 5v14" /></svg><svg class="play-icon" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="m8 5 11 7-11 7Z" /></svg></button>
-      <button id="gear" title="Settings" aria-label="Open settings"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06-2.83 2.83-.06-.06A1.7 1.7 0 0 0 15 19.4a1.7 1.7 0 0 0-1 .6 1.7 1.7 0 0 0-.4 1.1V21H9.6v-.09A1.7 1.7 0 0 0 8.5 19.4a1.7 1.7 0 0 0-1.88.34l-.06.06-2.83-2.83.06-.06A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-.6-1 1.7 1.7 0 0 0-1.1-.4H3V9.6h.09A1.7 1.7 0 0 0 4.6 8.5a1.7 1.7 0 0 0-.34-1.88l-.06-.06 2.83-2.83.06.06A1.7 1.7 0 0 0 9 4.6a1.7 1.7 0 0 0 1-.6 1.7 1.7 0 0 0 .4-1.1V3h4v.09A1.7 1.7 0 0 0 15.5 4.6a1.7 1.7 0 0 0 1.88-.34l.06-.06 2.83 2.83-.06.06A1.7 1.7 0 0 0 19.4 9c.12.38.34.73.65 1 .3.26.69.4 1.1.4H21v4h-.09A1.7 1.7 0 0 0 19.4 15Z"/></svg></button>
+      <button id="gear" title="Settings" aria-label="Open settings" aria-haspopup="dialog" aria-controls="settings" aria-expanded="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06-2.83 2.83-.06-.06A1.7 1.7 0 0 0 15 19.4a1.7 1.7 0 0 0-1 .6 1.7 1.7 0 0 0-.4 1.1V21H9.6v-.09A1.7 1.7 0 0 0 8.5 19.4a1.7 1.7 0 0 0-1.88.34l-.06.06-2.83-2.83.06-.06A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-.6-1 1.7 1.7 0 0 0-1.1-.4H3V9.6h.09A1.7 1.7 0 0 0 4.6 8.5a1.7 1.7 0 0 0-.34-1.88l-.06-.06 2.83-2.83.06.06A1.7 1.7 0 0 0 9 4.6a1.7 1.7 0 0 0 1-.6 1.7 1.7 0 0 0 .4-1.1V3h4v.09A1.7 1.7 0 0 0 15.5 4.6a1.7 1.7 0 0 0 1.88-.34l-.06-.06 2.83 2.83-.06.06A1.7 1.7 0 0 0 19.4 9c.12.38.34.73.65 1 .3.26.69.4 1.1.4H21v4h-.09A1.7 1.7 0 0 0 19.4 15Z"/></svg></button>
     </div>
-    <div id="settings">
+    <div id="settings" role="dialog" aria-label="Settings" aria-hidden="true">
       <h3>Settings</h3>
-      <h4>BOTS</h4>
-      <div class="seg" id="difficulty-seg"></div>
-      <h4>GAME MODE</h4>
-      <div class="seg" id="mode-seg"></div>
-      <h4>QUALITY</h4>
-      <div class="seg" id="quality-seg"></div>
-      <div class="tip" id="renderer-info">Renderer auto-selecting…</div>
-      <h4>TIME OF DAY</h4>
-      <div class="row"><label for="auto-time">Follow the match (afternoon &rarr; night)</label><input type="checkbox" id="auto-time" checked /></div>
-      <div class="row"><span id="time-label">15:24</span><input type="range" id="time-slider" min="0" max="24" step="0.05" value="15.4" /></div>
-      <div class="tip">Drag to scrub the sun. Press <kbd>T</kbd> in game to jump between noon, golden hour, dusk and night.</div>
-      <h4>EFFECTS</h4>
-      <div class="row"><label for="tog-ao">Ambient occlusion (WebGL2)</label><input type="checkbox" id="tog-ao" checked /></div>
-      <div class="row"><label for="tog-bloom">Bloom (WebGL2)</label><input type="checkbox" id="tog-bloom" checked /></div>
-      <div class="row"><label for="tog-mute">Mute sound (<kbd>M</kbd>)</label><input type="checkbox" id="tog-mute" /></div>
-      <h4>MOBILE</h4>
-      <div class="row"><label for="tog-haptics">Haptic feedback</label><input type="checkbox" id="tog-haptics" checked /></div>
-      <div class="row"><label for="tog-left">Left-handed controls</label><input type="checkbox" id="tog-left" /></div>
-      <div class="row"><span>Display</span><button class="compact-btn" id="enter-fullscreen">FULLSCREEN LANDSCAPE</button></div>
-      <div id="stats"></div>
+      <div class="settings-tabs" role="tablist" aria-label="Settings categories">
+        <button class="settings-tab" id="settings-tab-gameplay" type="button" role="tab" aria-selected="true" aria-controls="settings-panel-gameplay" tabindex="0" data-settings-tab="gameplay">Gameplay</button>
+        <button class="settings-tab" id="settings-tab-graphics" type="button" role="tab" aria-selected="false" aria-controls="settings-panel-graphics" tabindex="-1" data-settings-tab="graphics">Graphics</button>
+        <button class="settings-tab" id="settings-tab-controls" type="button" role="tab" aria-selected="false" aria-controls="settings-panel-controls" tabindex="-1" data-settings-tab="controls">Controls</button>
+      </div>
+      <div class="settings-pages">
+        <section class="settings-page" id="settings-panel-gameplay" role="tabpanel" aria-labelledby="settings-tab-gameplay" tabindex="0" data-settings-page="gameplay">
+          <h4>BOTS</h4>
+          <div class="seg" id="difficulty-seg"></div>
+          <h4>GAME MODE</h4>
+          <div class="seg" id="mode-seg"></div>
+        </section>
+        <section class="settings-page" id="settings-panel-graphics" role="tabpanel" aria-labelledby="settings-tab-graphics" tabindex="0" data-settings-page="graphics" hidden>
+          <h4>QUALITY</h4>
+          <div class="seg" id="quality-seg"></div>
+          <div class="tip" id="renderer-info">Renderer auto-selecting…</div>
+          <h4>TIME OF DAY</h4>
+          <div class="row"><label for="auto-time">Follow the match (afternoon &rarr; night)</label><input type="checkbox" id="auto-time" checked /></div>
+          <div class="row"><span id="time-label">15:24</span><input type="range" id="time-slider" min="0" max="24" step="0.05" value="15.4" /></div>
+          <div class="tip">Drag to scrub the sun. Press <kbd>T</kbd> in game to jump between noon, golden hour, dusk and night.</div>
+          <h4>EFFECTS</h4>
+          <div class="row"><label for="tog-ao">Ambient occlusion (WebGL2)</label><input type="checkbox" id="tog-ao" checked /></div>
+          <div class="row"><label for="tog-bloom">Bloom (WebGL2)</label><input type="checkbox" id="tog-bloom" checked /></div>
+          <div id="stats" aria-label="Rendering performance details"></div>
+        </section>
+        <section class="settings-page" id="settings-panel-controls" role="tabpanel" aria-labelledby="settings-tab-controls" tabindex="0" data-settings-page="controls" hidden>
+          <h4>AUDIO</h4>
+          <div class="row"><label for="tog-mute">Mute sound (<kbd>M</kbd>)</label><input type="checkbox" id="tog-mute" /></div>
+          <h4>MOBILE</h4>
+          <div class="row"><label for="tog-haptics">Haptic feedback</label><input type="checkbox" id="tog-haptics" checked /></div>
+          <div class="row"><label for="tog-left">Left-handed controls</label><input type="checkbox" id="tog-left" /></div>
+          <div class="row"><span>Display</span><button class="compact-btn" id="enter-fullscreen">FULLSCREEN LANDSCAPE</button></div>
+        </section>
+      </div>
     </div>
 
     <div id="menu" class="screen">
-      <h1 id="title">GELUD<span>BAKUHANTAM</span></h1>
-      <div id="tagline">Choose a mode, arena, and brawler before you jump in.</div>
-      <section class="menu-group">
-        <h2>GAME MODE</h2>
-        <div id="mode-cards" class="choice-cards"></div>
-      </section>
-      <section class="menu-group">
-        <h2>ARENA</h2>
-        <div id="arena-cards" class="choice-cards"></div>
-      </section>
-      <section class="menu-group brawler-group">
-        <h2>CHOOSE YOUR BRAWLER</h2>
-        <div id="cards"></div>
-      </section>
-      <button class="big-btn" id="play">PLAY</button>
-      <button class="ghost-btn multiplayer-menu-btn" id="open-multiplayer" type="button">MULTIPLAYER</button>
-      <div id="pwa-controls">
-        <button type="button" class="ghost-btn" id="install-game" aria-controls="install-help" aria-expanded="false">INSTALL GAME</button>
-        <button type="button" class="ghost-btn" id="update-game" hidden>UPDATE GAME</button>
-        <div id="install-help" hidden>
-          <p><b>iPhone / iPad:</b> Open in Safari → Share → Add to Home Screen → Open as Web App (if shown) → Add.</p>
-          <p><b>Android:</b> Open in Chrome → menu ⋮ → Install app / Add to Home screen. If opened inside another app, open this address in your browser first.</p>
-        </div>
-        <p id="pwa-status" role="status">Preparing offline play…</p>
+      <div class="menu-shell">
+        <header class="menu-brand-row">
+          <div class="menu-brand">
+            <h1 id="title">GELUD<span>BAKUHANTAM</span></h1>
+            <div id="tagline">Pick your fighter. Jump into the arena.</div>
+          </div>
+          <div class="menu-edition">SOLO ARENA</div>
+        </header>
+
+        <main class="menu-home-grid">
+          <section class="menu-actions" aria-label="Main menu">
+            <button class="menu-play" id="play" type="button">
+              <span class="menu-play-icon" aria-hidden="true">▶</span>
+              <span class="menu-play-copy"><strong>PLAY</strong><small>START A SOLO MATCH</small></span>
+              <span class="menu-play-arrow" aria-hidden="true">›</span>
+            </button>
+            <button class="menu-secondary" id="open-multiplayer" type="button">
+              <span class="menu-secondary-icon" aria-hidden="true">⚔</span>
+              <span><strong>MULTIPLAYER</strong><small>CREATE OR JOIN A ROOM</small></span>
+              <span class="menu-play-arrow" aria-hidden="true">›</span>
+            </button>
+            <div class="menu-actions-footer">
+              <div id="pwa-controls">
+                <button type="button" class="menu-install" id="install-game" aria-controls="install-help" aria-expanded="false">INSTALL APP</button>
+                <button type="button" class="menu-install" id="update-game" hidden>UPDATE APP</button>
+                <div id="install-help" hidden>
+                  <p><b>iPhone / iPad:</b> Open in Safari → Share → Add to Home Screen → Open as Web App (if shown) → Add.</p>
+                  <p><b>Android:</b> Open in Chrome → menu ⋮ → Install app / Add to Home screen. If opened inside another app, open this address in your browser first.</p>
+                </div>
+                <p id="pwa-status" role="status">Preparing offline play…</p>
+              </div>
+              <div id="menu-hint"><span class="for-keys">Settings <kbd>⚙</kbd> · move through choices with your keyboard</span><span class="for-touch">Choose your fighter and arena, then press Play</span></div>
+            </div>
+          </section>
+
+          <section class="menu-match-card" aria-labelledby="menu-match-title">
+            <div class="menu-card-heading">
+              <div><span class="menu-eyebrow">YOUR NEXT MATCH</span><h2 id="menu-match-title">READY TO FIGHT</h2></div>
+              <span class="menu-card-mark" aria-hidden="true">✦</span>
+            </div>
+
+            <div class="menu-brawler-summary">
+              <div class="menu-brawler-emblem" id="menu-brawler-emblem" aria-hidden="true">★</div>
+              <div class="menu-brawler-copy">
+                <span class="menu-eyebrow">SELECTED BRAWLER</span>
+                <strong id="menu-brawler-name">Athallah</strong>
+                <small id="menu-brawler-role">Shotgunner</small>
+              </div>
+              <button class="menu-edit-brawler" id="menu-edit-brawler" type="button" aria-haspopup="dialog" aria-controls="menu-picker" aria-expanded="false">CHANGE</button>
+            </div>
+
+            <div class="menu-match-options">
+              <button class="menu-option" id="menu-edit-mode" type="button" aria-haspopup="dialog" aria-controls="menu-picker" aria-expanded="false">
+                <span class="menu-eyebrow">GAME MODE</span><strong id="menu-mode-value">Deathmatch</strong><small>Change mode <b>›</b></small>
+              </button>
+              <button class="menu-option" id="menu-edit-arena" type="button" aria-haspopup="dialog" aria-controls="menu-picker" aria-expanded="false">
+                <span class="menu-eyebrow">ARENA</span><strong id="menu-arena-value">Green Crossroads</strong><small>Choose a map <b>›</b></small>
+              </button>
+            </div>
+            <p class="menu-match-note">Set up your next round here.</p>
+          </section>
+        </main>
       </div>
-      <div id="menu-hint"><span class="for-keys">Open <kbd>&#9881;</kbd> to scrub the time of day and tune shadows</span><span class="for-touch">Left thumb moves &middot; right thumb drags to aim, release to fire &middot; tap to auto-aim</span></div>
+
+      <div id="menu-picker" class="menu-picker" hidden aria-hidden="true">
+        <div class="menu-picker-backdrop" data-picker-dismiss aria-hidden="true"></div>
+        <section class="menu-picker-dialog" role="dialog" aria-modal="true" aria-labelledby="menu-picker-title" aria-describedby="menu-picker-description" tabindex="-1">
+          <header class="menu-picker-header">
+            <div><span class="menu-eyebrow">MATCH SETUP</span><h2 id="menu-picker-title">CHOOSE YOUR BRAWLER</h2><p id="menu-picker-description">Choose who you want to take into the arena.</p></div>
+            <button class="menu-picker-close" id="menu-picker-close" type="button" aria-label="Close selection">×</button>
+          </header>
+          <div class="menu-picker-content">
+            <section class="menu-picker-view" data-picker-content="brawler" aria-label="Choose a brawler" hidden>
+              <div class="menu-group brawler-group"><div id="cards"></div></div>
+            </section>
+            <section class="menu-picker-view" data-picker-content="mode" aria-label="Choose a game mode" hidden>
+              <div id="mode-cards" class="choice-cards"></div>
+            </section>
+            <section class="menu-picker-view" data-picker-content="arena" aria-label="Choose an arena" hidden>
+              <div id="arena-cards" class="choice-cards"></div>
+            </section>
+          </div>
+        </section>
+      </div>
     </div>
 
     <div id="multiplayer" class="screen" aria-labelledby="multiplayer-title">
@@ -194,6 +266,15 @@
       </div>
     </div>
     <div id="loading">Lighting the lamps&hellip;</div>
+    <div id="render-recovery" role="alertdialog" aria-modal="true" aria-labelledby="render-recovery-title" hidden>
+      <div class="render-recovery-card">
+        <h2 id="render-recovery-title">Rendering stopped</h2>
+        <p>The renderer stopped while drawing the game. Reload with WebGL2 or retry the current renderer.</p>
+        <pre id="render-recovery-message"></pre>
+        <button class="big-btn" id="render-recovery-webgl" type="button">RELOAD WITH WEBGL2</button>
+        <button class="ghost-btn" id="render-recovery-reload" type="button">RELOAD GAME</button>
+      </div>
+    </div>
   <script type="module" src="./src/bootstrap.js"></script>
 </body>
 </html>

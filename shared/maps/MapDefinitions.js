@@ -49,9 +49,15 @@ function getMapPack() {
 
 function buildBlueprintLayout(mapId, seed) {
   const pack = getMapPack();
-  if (!pack?.generate || !pack.MAPS?.[mapId]) return null;
+  if (mapId === 'open' && !pack?.MAPS?.[mapId]) return null;
+  if (!MAPS[mapId]) return null;
+  if (!pack?.generate || !pack.MAPS?.[mapId]) {
+    throw new Error(`[maps] selected map ${mapId} is missing from the loaded map pack`);
+  }
   const blueprint = pack.generate(mapId, seed);
-  if (!blueprint?.cells?.length) return null;
+  if (blueprint?.id !== mapId || !blueprint.cells?.length) {
+    throw new Error(`[maps] map pack returned an invalid blueprint for ${mapId}`);
+  }
 
   const cells = pack.CELL;
   const size = blueprint.size;

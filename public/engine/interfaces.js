@@ -692,6 +692,38 @@ var Vu = class {
     setTouchMode(e) {
       ((this.touch = e), document.body.classList.toggle(`touch`, e), (this.lastSuper = -1), (this.lastItemUi = []), (this.lastFlickerUi = ``));
     }
+    recordFrame(deltaSeconds) {
+      this.frames++;
+      this.statsT += Math.max(0, deltaSeconds);
+      if (this.statsT < 0.5) return;
+      ((this.fps = Math.round(this.frames / this.statsT)), (this.frames = 0), (this.statsT = 0), (this.fpsEl.textContent = `FPS ${this.fps}`));
+      if (!$(`settings`).classList.contains(`open`)) return;
+      const game = this.game,
+        render = game.frameStats,
+        lighting = game.lighting,
+        renderer = game.pipeline.renderer,
+        canvas = renderer.domElement;
+      let litLamps = 0,
+        castingLamps = 0,
+        poolLit = 0;
+      for (let light of lighting.lampSlots) {
+        light.intensity > 0.01 && litLamps++;
+        light.castShadow && light.shadow.autoUpdate && castingLamps++;
+      }
+      for (let light of lighting.pool) light.intensity > 0 && poolLit++;
+      const updateMs = Number.isFinite(render.updateMs) ? render.updateMs.toFixed(1) : `—`,
+        updateP95Ms = Number.isFinite(render.updateP95Ms) ? render.updateP95Ms.toFixed(1) : `—`,
+        renderMs = Number.isFinite(render.renderMs) ? render.renderMs.toFixed(1) : `—`,
+        renderP95Ms = Number.isFinite(render.renderP95Ms) ? render.renderP95Ms.toFixed(1) : `—`,
+        renderLabel = game.pipeline.isWebGPU ? `CPU submit` : `CPU render`,
+        buffer = `${canvas.width}×${canvas.height}`,
+        cssSize = `${canvas.clientWidth}×${canvas.clientHeight}`;
+      $(`stats`).textContent =
+        `${this.fps} fps   ${render.calls} draws   ${(render.triangles / 1e3).toFixed(0)}k tris   ${(render.points / 1e3).toFixed(0)}k pts\nCPU update ${updateMs} ms (p95 ${updateP95Ms})   ${renderLabel} ${renderMs} ms (p95 ${renderP95Ms})\nrenderer: ${game.pipeline.isWebGPU ? `WebGPU` : `WebGL2`}   buffer ${buffer} (${game.pipeline.pixelRatio.toFixed(2)}×; CSS ${cssSize})\nsun shadow ${lighting.mapSize}px over ${(lighting.shadowRadius * 2).toFixed(0)}m  (${game.pipeline.usingPCSS ? `PCSS` : `PCF`})\nlamps lit ${litLamps}  casting ${castingLamps}   pool lights ${poolLit}/${lighting.pool.length}\n` +
+        (game.userPickedQuality
+          ? `quality: your choice`
+          : `quality: auto  (night frame ${game.perf.benchMs ? game.perf.benchMs.toFixed(1) : `?`} ms at startup)`);
+    }
     updateSticks() {
       if (!this.touch) {
         document.body.classList.remove(`aiming`);
@@ -745,7 +777,10 @@ var Vu = class {
           (r.dataset.mode = t),
           (r.innerHTML = `<strong>${n.label}</strong><small>${modeDescriptions[t] || `Choose this game mode.`}</small>`),
           r.setAttribute(`aria-pressed`, String(t === this.game.modeName)),
-          r.addEventListener(`click`, () => this.game.setMode(t)),
+          r.addEventListener(`click`, () => {
+            this.game.setMode(t);
+            this.closeMenuPicker();
+          }),
           $(`mode-cards`).appendChild(r));
       }
       for (let [t, n] of Object.entries(ARENA_VARIANTS)) {
@@ -755,7 +790,11 @@ var Vu = class {
           (r.dataset.arena = t),
           (r.innerHTML = `<strong>${n.icon} ${n.label}</strong><small>${n.description}</small>`),
           r.setAttribute(`aria-pressed`, String(t === this.game.arenaName)),
-          r.addEventListener(`click`, () => this.game.setArena(t)),
+          r.addEventListener(`click`, () => {
+            const changed = this.game.setArena(t);
+            this.syncMenuSummary();
+            if (changed !== !1) this.closeMenuPicker();
+          }),
           $(`arena-cards`).appendChild(r));
       }
       for (let r of Object.values(Bc)) {
@@ -775,7 +814,7 @@ var Vu = class {
         ${n(`DURABILITY`, stats.durability)}${n(`AGILITY`, stats.agility)}${n(`DAMAGE`, stats.damage)}${n(`RANGE`, stats.range)}
         <div class="passive"><b>PASSIVE</b> ${r.passive || `No passive`}</div>`;
         let l = () => {
-          (this.game.audio.unlock(), this.game.audio.play(`click`), this.select(r.id));
+          (this.game.audio.unlock(), this.game.audio.play(`click`), this.select(r.id), this.closeMenuPicker());
         };
         (i.addEventListener(`click`, l),
           i.addEventListener(`keydown`, (e) => {
@@ -786,6 +825,42 @@ var Vu = class {
       ($(`play`).addEventListener(`click`, () => {
         (this.game.audio.unlock(), this.game.enterImmersive(), this.game.startMatch(this.selected));
       }),
+        [
+          [`menu-edit-brawler`, `brawler`],
+          [`menu-edit-mode`, `mode`],
+          [`menu-edit-arena`, `arena`],
+        ].forEach(([id, kind]) => {
+          const trigger = $(id);
+          trigger.addEventListener(`click`, () => this.openMenuPicker(kind, trigger));
+        }),
+        $(`menu-picker-close`).addEventListener(`click`, () => this.closeMenuPicker()),
+        $(`menu-picker`).addEventListener(`click`, (event) => {
+          event.target.matches(`[data-picker-dismiss]`) && this.closeMenuPicker();
+        }),
+        $(`menu-picker`).addEventListener(`keydown`, (event) => {
+          const panel = $(`menu-picker`);
+          if (event.key === `Escape`) {
+            event.preventDefault();
+            this.closeMenuPicker();
+            return;
+          }
+          if (event.key !== `Tab`) return;
+          const focusable = [...panel.querySelectorAll(`button:not(:disabled), [role="button"][tabindex], [href], input:not(:disabled), select:not(:disabled), [tabindex]:not([tabindex="-1"])`)].filter((node) => !node.closest(`[hidden]`));
+          if (!focusable.length) {
+            event.preventDefault();
+            $(`menu-picker`).querySelector(`[role="dialog"]`).focus();
+            return;
+          }
+          const first = focusable[0];
+          const last = focusable[focusable.length - 1];
+          if (event.shiftKey && (document.activeElement === first || document.activeElement === panel.querySelector(`[role="dialog"]`))) {
+            event.preventDefault();
+            last.focus();
+          } else if (!event.shiftKey && document.activeElement === last) {
+            event.preventDefault();
+            first.focus();
+          }
+        }),
         $(`again`).addEventListener(`click`, () => (this.game.requestNetworkRematch?.() || (this.game.enterImmersive(), this.game.startMatch(this.selected)))),
         $(`to-menu`).addEventListener(`click`, () => this.game.toMenu()));
       ($(`resume-match`).addEventListener(`click`, () => this.game.setPaused(!1)),
@@ -798,14 +873,76 @@ var Vu = class {
             (n < 0 || (e.shiftKey && n === 0)
               ? (e.preventDefault(), t[e.shiftKey ? t.length - 1 : 0].focus())
               : !e.shiftKey && n === t.length - 1 && (e.preventDefault(), t[0].focus()));
-        }));
+        })),
+        this.syncMenuSummary();
+    }
+    openMenuPicker(kind, trigger) {
+      const panel = $(`menu-picker`);
+      const views = [...panel.querySelectorAll(`[data-picker-content]`)];
+      const activeView = views.find((view) => view.dataset.pickerContent === kind);
+      if (!activeView) return;
+      this.menuPickerReturn = trigger || document.activeElement;
+      for (const view of views) view.hidden = view !== activeView;
+      const titles = {
+        brawler: [`CHOOSE YOUR BRAWLER`, `Choose who you want to take into the arena.`],
+        mode: [`CHOOSE GAME MODE`, `Pick the rules for your next solo match.`],
+        arena: [`CHOOSE AN ARENA`, `Select a map for your next match.`],
+      };
+      const [title, description] = titles[kind];
+      $(`menu-picker-title`).textContent = title;
+      $(`menu-picker-description`).textContent = description;
+      $(`settings`).classList.remove(`open`);
+      $(`settings`).setAttribute(`aria-hidden`, `true`);
+      $(`gear`).setAttribute(`aria-expanded`, `false`);
+      $(`gear`).setAttribute(`aria-label`, `Open settings`);
+      $(`gear`).setAttribute(`title`, `Settings`);
+      document.body.classList.add(`menu-picker-open`);
+      panel.hidden = !1;
+      panel.setAttribute(`aria-hidden`, `false`);
+      document.querySelectorAll(`[aria-controls="menu-picker"]`).forEach((button) => button.setAttribute(`aria-expanded`, String(button === trigger)));
+      requestAnimationFrame(() => {
+        const firstChoice = activeView.querySelector(`button, [role="button"][tabindex]`);
+        (firstChoice || panel.querySelector(`[role="dialog"]`)).focus({ preventScroll: !0 });
+      });
+    }
+    closeMenuPicker(restoreFocus = !0) {
+      const panel = $(`menu-picker`);
+      if (!panel || panel.hidden) return;
+      panel.hidden = !0;
+      panel.setAttribute(`aria-hidden`, `true`);
+      document.body.classList.remove(`menu-picker-open`);
+      document.querySelectorAll(`[aria-controls="menu-picker"]`).forEach((button) => button.setAttribute(`aria-expanded`, `false`));
+      const returnFocus = this.menuPickerReturn;
+      this.menuPickerReturn = null;
+      if (restoreFocus && returnFocus?.isConnected) returnFocus.focus({ preventScroll: !0 });
+    }
+    syncMenuSummary() {
+      const mode = this.game.mode?.label || MATCH_MODES[this.game.modeName]?.label || `Deathmatch`;
+      const arena = ARENA_VARIANTS[this.game.arenaName]?.label || `Select arena`;
+      const modeValue = $(`menu-mode-value`);
+      const arenaValue = $(`menu-arena-value`);
+      if (modeValue) modeValue.textContent = mode;
+      if (arenaValue) arenaValue.textContent = arena;
+      const card = [...document.querySelectorAll(`#cards .card`)].find((entry) => entry.dataset.id === this.selected);
+      if (!card) return;
+      const icon = card.querySelector(`.swatch`);
+      const name = card.querySelector(`h2`);
+      const role = card.querySelector(`.role`);
+      const emblem = $(`menu-brawler-emblem`);
+      if (emblem && icon) {
+        emblem.textContent = icon.textContent.trim() || `★`;
+        emblem.style.background = icon.style.background || ``;
+      }
+      if ($(`menu-brawler-name`) && name) $(`menu-brawler-name`).textContent = name.textContent;
+      if ($(`menu-brawler-role`) && role) $(`menu-brawler-role`).textContent = role.textContent;
     }
     select(e) {
       ((this.selected = e),
         document.querySelectorAll(`#cards .card`).forEach((t) => {
           let n = t.dataset.id === e;
           (t.classList.toggle(`on`, n), t.setAttribute(`aria-pressed`, String(n)));
-        }));
+        }),
+        this.syncMenuSummary());
     }
     selectArena(e) {
       document.querySelectorAll(`#arena-cards .choice-card`).forEach((t) => {
@@ -824,7 +961,7 @@ var Vu = class {
         r = !!e;
       if (r) {
         n.classList.contains(`open`) || (this.pauseFocusReturn = document.activeElement);
-        (n.classList.add(`open`), n.setAttribute(`aria-hidden`, `false`), $(`settings`).classList.remove(`open`), $(`gear`).setAttribute(`aria-expanded`, `false`), $(`resume-match`).focus({ preventScroll: !0 }));
+        (n.classList.add(`open`), n.setAttribute(`aria-hidden`, `false`), $(`settings`).classList.remove(`open`), $(`settings`).setAttribute(`aria-hidden`, `true`), $(`gear`).setAttribute(`aria-expanded`, `false`), $(`gear`).setAttribute(`aria-label`, `Open settings`), $(`gear`).setAttribute(`title`, `Settings`), $(`resume-match`).focus({ preventScroll: !0 }));
         return;
       }
       (n.classList.remove(`open`), n.setAttribute(`aria-hidden`, `true`));
@@ -853,8 +990,47 @@ var Vu = class {
         t = $(`settings`);
       $(`gear`).addEventListener(`click`, () => {
         let e = t.classList.toggle(`open`);
-        $(`gear`).setAttribute(`aria-expanded`, String(e));
+        (t.setAttribute(`aria-hidden`, String(!e)),
+          $(`gear`).setAttribute(`aria-expanded`, String(e)),
+          $(`gear`).setAttribute(`aria-label`, e ? `Close settings` : `Open settings`),
+          $(`gear`).setAttribute(`title`, e ? `Close settings` : `Settings`));
       });
+      const settingsTabs = [...t.querySelectorAll(`[data-settings-tab]`)];
+      const activateSettingsTab = (name, focus = !1) => {
+        const active = settingsTabs.find((tab) => tab.dataset.settingsTab === name);
+        if (!active) return;
+        for (const tab of settingsTabs) {
+          const selected = tab === active;
+          tab.setAttribute(`aria-selected`, String(selected));
+          tab.tabIndex = selected ? 0 : -1;
+        }
+        for (const page of t.querySelectorAll(`[data-settings-page]`)) page.hidden = page.dataset.settingsPage !== name;
+        if (focus) active.focus({ preventScroll: !0 });
+      };
+      settingsTabs.forEach((tab, index) => {
+        tab.addEventListener(`click`, () => activateSettingsTab(tab.dataset.settingsTab));
+        tab.addEventListener(`keydown`, (event) => {
+          let nextIndex = index;
+          if (event.key === `ArrowRight`) nextIndex = (index + 1) % settingsTabs.length;
+          else if (event.key === `ArrowLeft`) nextIndex = (index - 1 + settingsTabs.length) % settingsTabs.length;
+          else if (event.key === `Home`) nextIndex = 0;
+          else if (event.key === `End`) nextIndex = settingsTabs.length - 1;
+          else return;
+          event.preventDefault();
+          activateSettingsTab(settingsTabs[nextIndex].dataset.settingsTab, !0);
+        });
+      });
+      t.addEventListener(`keydown`, (event) => {
+        if (event.key !== `Escape`) return;
+        event.preventDefault();
+        t.classList.remove(`open`);
+        t.setAttribute(`aria-hidden`, `true`);
+        $(`gear`).setAttribute(`aria-expanded`, `false`);
+        $(`gear`).setAttribute(`aria-label`, `Open settings`);
+        $(`gear`).setAttribute(`title`, `Settings`);
+        $(`gear`).focus({ preventScroll: !0 });
+      });
+      activateSettingsTab(`gameplay`);
       let n = $(`quality-seg`);
       for (let [t, r] of Object.entries(Uc)) {
         let i = document.createElement(`button`);
@@ -922,7 +1098,8 @@ var Vu = class {
         ($(`tog-bloom`).disabled = e.pipeline.isWebGPU),
         ($(`tog-mute`).checked = e.audio.muted),
         ($(`tog-haptics`).checked = e.haptics),
-        ($(`tog-left`).checked = e.leftHanded));
+        ($(`tog-left`).checked = e.leftHanded),
+        this.syncMenuSummary());
     }
     toast(e) {
       let t = $(`toast`);
@@ -1149,39 +1326,7 @@ var Vu = class {
       let lowHealth = a && a.alive ? $c((0.4 - a.hp / a.maxHp) / 0.4, 0, 1) : 0;
       $(`low-health`).style.opacity = (lowHealth * (0.56 + Math.sin(t.elapsed * 4.5) * 0.1)).toFixed(2);
       let s = a && a.alive && t.gas.active && t.gas.depthAt(a.x, a.z) > 0.35;
-      if (
-        (s !== this.lastGasWarning &&
-          ((this.lastGasWarning = s), ($(`gas-warn`).style.opacity = s ? `1` : `0`)),
-        this.frames++,
-        (this.statsT += e),
-        this.statsT >= 0.5 &&
-          ((this.fps = Math.round(this.frames / this.statsT)),
-          (this.frames = 0),
-          (this.statsT = 0),
-          (this.fpsEl.textContent = `FPS ${this.fps}`),
-          $(`settings`).classList.contains(`open`)))
-      ) {
-        let e = { render: t.frameStats },
-          n = t.lighting,
-          r = 0,
-          i = 0,
-          poolLit = 0;
-        for (let e of n.lampSlots) {
-          e.intensity > 0.01 && r++;
-          e.castShadow && e.shadow.autoUpdate && i++;
-        }
-        for (let e of n.pool) e.intensity > 0 && poolLit++;
-        let renderStats = e.render,
-          updateMs = Number.isFinite(renderStats.updateMs) ? renderStats.updateMs.toFixed(1) : `—`,
-          updateP95Ms = Number.isFinite(renderStats.updateP95Ms) ? renderStats.updateP95Ms.toFixed(1) : `—`,
-          renderMs = Number.isFinite(renderStats.renderMs) ? renderStats.renderMs.toFixed(1) : `—`,
-          renderP95Ms = Number.isFinite(renderStats.renderP95Ms) ? renderStats.renderP95Ms.toFixed(1) : `—`;
-        $(`stats`).textContent =
-          `${this.fps} fps   ${e.render.calls} draws   ${(e.render.triangles / 1e3).toFixed(0)}k tris\nCPU update ${updateMs} ms (p95 ${updateP95Ms})   CPU render ${renderMs} ms (p95 ${renderP95Ms})\nrenderer: ${t.pipeline.isWebGPU ? `WebGPU` : `WebGL2`}\nsun shadow ${n.mapSize}px over ${(n.shadowRadius * 2).toFixed(0)}m  (${t.pipeline.usingPCSS ? `PCSS` : `PCF`})\nlamps lit ${r}  casting ${i}   pool lights ${poolLit}/${n.pool.length}\n` +
-          (t.userPickedQuality
-            ? `quality: your choice`
-            : `quality: auto  (night frame ${t.perf.benchMs ? t.perf.benchMs.toFixed(1) : `?`} ms at startup)`);
-      }
+      s !== this.lastGasWarning && ((this.lastGasWarning = s), ($(`gas-warn`).style.opacity = s ? `1` : `0`));
     }
     syncSkillButtons(player) {
       const actions = $(`action-cluster`);

@@ -91,7 +91,14 @@ var Yc = {
       let t = +!this.usingPCSS;
       this.renderer.shadowMap.type !== t && (this.renderer.shadowMap.type = t);
       let passLayoutChanged = !previous || previous.msaa !== this.quality.msaa || previous.ao !== this.quality.ao || previous.bloom !== this.quality.bloom;
-      if (passLayoutChanged || (!this.isWebGPU && !this.composer)) this.build();
+      if (this.isWebGPU) {
+        let width = Math.max(2, this.renderer.domElement.clientWidth || window.innerWidth);
+        let height = Math.max(2, this.renderer.domElement.clientHeight || window.innerHeight);
+        this.setSize(width, height, this.getPixelRatio(width, height));
+        this.requestShadowUpdate(!0);
+        return;
+      }
+      if (passLayoutChanged || !this.composer) this.build();
       else {
         let width = Math.max(2, this.renderer.domElement.clientWidth || window.innerWidth);
         let height = Math.max(2, this.renderer.domElement.clientHeight || window.innerHeight);
@@ -105,13 +112,10 @@ var Yc = {
     getPixelRatio(e, t) {
       const width = Math.max(1, e),
         height = Math.max(1, t),
-        deviceRatio = Math.max(0.25, window.devicePixelRatio || 1),
-        hdFloor = Math.min(deviceRatio, Math.max(1280 / width, 720 / height));
-      let n = Math.max(hdFloor, (this.superSample || Math.min(deviceRatio, this.quality.dpr)) * this.performanceScale),
-        r = window.matchMedia && window.matchMedia(`(pointer: coarse)`).matches ? this.maxPixelsCoarse : this.maxPixelsFine;
-      const pixelBudget = Math.max(r, width * height * hdFloor * hdFloor);
-      n *= Math.min(1, Math.sqrt(pixelBudget / Math.max(1, width * height * n * n)));
-      return Math.max(hdFloor, n);
+        requestedRatio = this.superSample || this.quality.renderScale,
+        budget = window.matchMedia && window.matchMedia(`(pointer: coarse)`).matches ? this.maxPixelsCoarse : this.maxPixelsFine,
+        budgetRatio = Math.sqrt(budget / Math.max(1, width * height));
+      return Math.max(0.25, Math.min(requestedRatio * this.performanceScale, budgetRatio));
     }
     setPerformanceScale(e) {
       let n = $c(Number(e) || 1, 0.6, 1);
@@ -200,6 +204,7 @@ var Yc = {
     }
     setToggle(e, t) {
       this.toggles[e] = t;
+      if (this.isWebGPU) return;
       if (e === `ao` && this.quality.ao && (t ? !this.gtao : this.gtao)) return this.build();
       if (e === `bloom` && this.quality.bloom && (t ? !this.bloom : this.bloom)) return this.build();
       (e === `ao` && this.gtao && (this.gtao.enabled = t),

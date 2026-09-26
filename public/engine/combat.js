@@ -1624,6 +1624,15 @@ var Su = class {
     }
     setQuality(e) {
       this.maxActive = Math.max(1, Math.floor(this.cap * e));
+      while (this.activeSlots.length > this.maxActive) {
+        let slot = this.activeSlots.shift();
+        ((this.activeFlags[slot] = 0), (this.life[slot] = 0), (this.alpha[slot] = 0), (this.size[slot] = 0), (this.col[slot * 4 + 3] = 0));
+      }
+      if (this.webgpu) this.points.geometry.setDrawRange(0, this.activeSlots.length);
+      else {
+        this.points.geometry.attributes.aColor.needsUpdate = !0;
+        this.points.geometry.attributes.aSize.needsUpdate = !0;
+      }
     }
     emit(e, t, n, r, i, a, o, s, c, l, u, d, f = 1, p = 1.5, m = 0) {
       if (this.activeSlots.length >= this.maxActive) return;

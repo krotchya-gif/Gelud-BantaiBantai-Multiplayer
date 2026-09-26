@@ -112,8 +112,8 @@ var ld = class {
       (this.timePreset = 0),
       (this.autoTime = t.autoTime !== !1),
       (this.adaptiveT = 0),
-      (this.perf = { t: 0, frames: 0, done: !1, lowFpsWindows: 0, stableFpsWindows: 0 }),
-      (this.frameStats = { calls: 0, triangles: 0, updateMs: 0, renderMs: 0, updateP95Ms: 0, renderP95Ms: 0 }),
+      (this.perf = { t: 0, frames: 0, done: !1, lowFpsWindows: 0, stableFpsWindows: 0, highFpsWindows: 0 }),
+      (this.frameStats = { calls: 0, triangles: 0, points: 0, updateMs: 0, renderMs: 0, updateP95Ms: 0, renderP95Ms: 0 }),
       (this.frameTiming = {
         update: new Float32Array(120),
         render: new Float32Array(120),
@@ -125,7 +125,7 @@ var ld = class {
     ((this.nextSeed = Number.isFinite(a) ? a : (Math.random() * 1e9) | 0),
       (this.fixedSeed = Number.isFinite(a) ? a : null),
       (this.maxAniso = this.pipeline.renderer.capabilities?.getMaxAnisotropy?.() ?? 4),
-      (this.world = new Zl(this.scene, this.nextSeed, this.maxAniso, this.arenaName)),
+      (this.world = new Zl(this.scene, this.nextSeed, this.maxAniso, this.arenaName, this.pipeline.quality.tier)),
       this.lighting.setBiomePalette(this.world.biomePalette),
       this.lighting.setLamps(this.world.lanterns, this.world.lampGlass),
       (this.effects = new Nu(this)),
@@ -150,7 +150,7 @@ var ld = class {
           t === `Escape` &&
             (this.paused
               ? this.setPaused(!1)
-              : ($(`settings`).classList.remove(`open`), $(`gear`).setAttribute(`aria-expanded`, `false`))));
+              : ($(`settings`).classList.remove(`open`), $(`settings`).setAttribute(`aria-hidden`, `true`), $(`gear`).setAttribute(`aria-expanded`, `false`), $(`gear`).setAttribute(`aria-label`, `Open settings`), $(`gear`).setAttribute(`title`, `Settings`))));
       }),
       this.hud.syncSettings(),
       (() => {
@@ -306,23 +306,56 @@ var ld = class {
     } catch {}
   }
   setQuality(e, t = !1) {
-    (t &&
-      ((this.userPickedQuality = !0),
-      (this.mobileDefaultQuality = !1)),
-      t && (this.pipeline.performanceScale = 1),
-      t && this.setPerformanceEffectsReduced(!1),
-      this.pipeline.setQuality(e),
-      this.perf && ((this.perf.t = 0), (this.perf.frames = 0), (this.perf.lowFpsWindows = 0), (this.perf.stableFpsWindows = 0)),
-      this.effects?.setQuality(this.pipeline.quality.tier),
-      this.gas?.setQuality(this.pipeline.quality.tier),
-      this.lighting.applyQuality(this.pipeline.quality),
-      this.syncPerformanceShadows(),
-      this.hud.syncSettings(),
-      this.save());
+    if (!Uc[e]) return !1;
+    const previous = {
+      qualityName: this.pipeline.qualityName,
+      userPickedQuality: this.userPickedQuality,
+      mobileDefaultQuality: this.mobileDefaultQuality,
+      performanceEffectsReduced: this.performanceEffectsReduced,
+      performanceScale: this.pipeline.performanceScale,
+    };
+    try {
+      if (t) {
+        this.userPickedQuality = !0;
+        this.mobileDefaultQuality = !1;
+        this.pipeline.performanceScale = 1;
+        this.setPerformanceEffectsReduced(!1);
+      }
+      this.pipeline.setQuality(e);
+      this.effects?.setQuality(this.pipeline.quality.tier);
+      this.world?.setQuality(this.pipeline.quality.tier);
+      this.gas?.setQuality(this.pipeline.quality.tier);
+      this.lighting.applyQuality(this.pipeline.quality);
+      this.syncPerformanceShadows();
+    } catch (error) {
+      console.error(`[quality] failed to apply ${e}; restoring ${previous.qualityName}`, error);
+      this.userPickedQuality = previous.userPickedQuality;
+      this.mobileDefaultQuality = previous.mobileDefaultQuality;
+      this.performanceEffectsReduced = previous.performanceEffectsReduced;
+      this.pipeline.performanceScale = previous.performanceScale;
+      try {
+        this.pipeline.setQuality(previous.qualityName);
+        this.effects?.setQuality(this.pipeline.quality.tier);
+        this.world?.setQuality(this.pipeline.quality.tier);
+        this.gas?.setQuality(this.pipeline.quality.tier);
+        this.effects?.setPerformanceReduced(previous.performanceEffectsReduced);
+        this.lighting.applyQuality(this.pipeline.quality);
+        this.syncPerformanceShadows();
+      } catch (rollbackError) {
+        this.showRenderRecovery(new AggregateError([error, rollbackError], `Could not apply or restore graphics quality.`));
+      }
+      this.hud?.syncSettings();
+      if (t) this.hud?.toast(`Quality change failed. ${previous.qualityName} was restored.`);
+      return !1;
+    }
+    this.perf && ((this.perf.t = 0), (this.perf.frames = 0), (this.perf.lowFpsWindows = 0), (this.perf.stableFpsWindows = 0), (this.perf.highFpsWindows = 0));
+    this.hud.syncSettings();
+    this.save();
+    return !0;
   }
   syncPerformanceShadows() {
     if (!this.lighting || this.pipeline.isWebGPU) return;
-    const enabled = !this.mobileDefaultQuality && !this.lowEndDevice && !this.performanceEffectsReduced;
+    const enabled = !this.mobileDefaultQuality && !this.lowEndDevice && !this.performanceEffectsReduced && this.pipeline.quality.tier > 0;
     this.lighting.key.castShadow = enabled;
     this.lighting.lampSlots.forEach((light, index) => {
       light.castShadow = enabled && this.pipeline.quality.lampShadows && index < this.lighting.lampShadowSlots;
@@ -362,11 +395,24 @@ var ld = class {
   }
   setArena(e) {
     if (!ARENA_VARIANTS[e] || this.state !== `menu`) return;
-    let t = this.fixedSeed;
-    ((this.arenaName = e),
-      this.state === `menu` && (this.newWorld(), (this.fixedSeed = t), this.spawnRoster(null)),
-      this.hud.syncSettings(),
-      this.save());
+    const previousArena = this.arenaName;
+    const fixedSeed = this.fixedSeed;
+    this.arenaName = e;
+    try {
+      this.newWorld();
+    } catch (error) {
+      this.arenaName = previousArena;
+      this.fixedSeed = fixedSeed;
+      console.error(`[map] failed to load ${e}; keeping ${previousArena}`, error);
+      this.hud.syncSettings();
+      this.hud.toast(`Could not load ${ARENA_VARIANTS[e].label}. Previous map kept.`);
+      return !1;
+    }
+    this.fixedSeed = fixedSeed;
+    this.spawnRoster(null);
+    this.hud.syncSettings();
+    this.save();
+    return !0;
   }
   setHaptics(e) {
     ((this.haptics = e), this.save());
@@ -429,13 +475,30 @@ var ld = class {
       this.hud.reset());
   }
   newWorld() {
-    (this.world.dispose(),
-      (this.nextSeed = this.fixedSeed === null ? (Math.random() * 1e9) | 0 : this.fixedSeed),
-      (this.fixedSeed = null),
-      (this.world = new Zl(this.scene, this.nextSeed, this.maxAniso, this.arenaName)),
-      this.lighting.setBiomePalette(this.world.biomePalette),
-      this.lighting.setLamps(this.world.lanterns, this.world.lampGlass),
-      this.effects.rebuildFireflies());
+    const seed = this.fixedSeed === null ? (Math.random() * 1e9) | 0 : this.fixedSeed;
+    const nextWorld = new Zl(this.scene, seed, this.maxAniso, this.arenaName, this.pipeline.quality.tier);
+    const previousWorld = this.world;
+    this.world = nextWorld;
+    try {
+      this.lighting.setBiomePalette(nextWorld.biomePalette);
+      this.lighting.setLamps(nextWorld.lanterns, nextWorld.lampGlass);
+      this.effects.rebuildFireflies();
+    } catch (error) {
+      this.world = previousWorld;
+      try {
+        this.lighting.setBiomePalette(previousWorld.biomePalette);
+        this.lighting.setLamps(previousWorld.lanterns, previousWorld.lampGlass);
+        this.effects.rebuildFireflies();
+      } catch (rollbackError) {
+        console.error(`[world] failed to restore the previous world after map generation failed`, rollbackError);
+      }
+      nextWorld.dispose();
+      throw error;
+    }
+    this.nextSeed = seed;
+    this.fixedSeed = null;
+    previousWorld?.dispose();
+    return nextWorld;
   }
   spawnRoster(e) {
     this.clearEntities();
@@ -2610,10 +2673,13 @@ var ld = class {
       return;
     let n = t.frames / t.t;
     ((t.t = 0), (t.frames = 0));
-    if (n <= 30 && this.pipeline.qualityName === `high`) {
-      (this.setPerformanceEffectsReduced(!0), this.setQuality(`medium`));
-      return;
-    }
+    if (this.pipeline.qualityName === `high` && n <= 30) {
+      t.highFpsWindows = (t.highFpsWindows || 0) + 1;
+      if (t.highFpsWindows >= 2) {
+        (this.setPerformanceEffectsReduced(!0), this.setQuality(`medium`));
+        return;
+      }
+    } else t.highFpsWindows = 0;
     if (n < 60) {
       ((t.lowFpsWindows = (t.lowFpsWindows || 0) + 1), (t.stableFpsWindows = 0));
       t.lowFpsWindows >= 2 && this.setPerformanceEffectsReduced(!0);
@@ -2638,18 +2704,40 @@ var ld = class {
       (this.frameStats.renderP95Ms = quantile(r.render)),
       (r.elapsed = 0));
   }
+  showRenderRecovery(error) {
+    if (this.renderFailed) return;
+    this.renderFailed = !0;
+    console.error(`[renderer] stopped; showing recovery options`, error);
+    const overlay = document.getElementById(`render-recovery`);
+    const message = document.getElementById(`render-recovery-message`);
+    const fallbackButton = document.getElementById(`render-recovery-webgl`);
+    const reloadButton = document.getElementById(`render-recovery-reload`);
+    if (!overlay) return;
+    const description = error instanceof Error ? error.message : String(error || `Unknown render error`);
+    if (message) message.textContent = description.slice(0, 400);
+    if (fallbackButton) fallbackButton.onclick = () => {
+      const url = new URL(location.href);
+      url.searchParams.set(`renderer`, `webgl`);
+      location.assign(url);
+    };
+    if (reloadButton) reloadButton.onclick = () => location.reload();
+    overlay.hidden = !1;
+  }
   frame(e) {
+    if (this.renderFailed) return;
+    try {
     let t = (e - this.last) / 1e3,
       n = Math.min(0.05, Math.max(1e-4, t));
     this.last = e;
     let r = this.pipeline.renderer.info;
-    ((this.frameStats.calls = r.render.calls), (this.frameStats.triangles = r.render.triangles), r.reset());
+    ((this.frameStats.calls = r.render.drawCalls ?? r.render.calls ?? 0), (this.frameStats.triangles = r.render.triangles || 0), (this.frameStats.points = r.render.points || 0), r.reset());
     let updateStart = performance.now();
     for (let e = 0; e < this.simSteps; e++) this.update(n);
     let updateMs = performance.now() - updateStart,
       renderStart = performance.now();
     (this.pipeline.render(n),
       this.recordFrameTiming(updateMs, performance.now() - renderStart, t),
+      this.hud.recordFrame(t),
       this.warmup > 0 &&
         --this.warmup === 0 &&
         (this.benchmarkQuality(),
@@ -2657,11 +2745,16 @@ var ld = class {
         document.getElementById(`loading`).classList.add(`done`)),
       this.adaptQuality(t),
       requestAnimationFrame(this.frame));
+    } catch (error) {
+      this.showRenderRecovery(error);
+    }
   }
 };
 function ud(e) {
   let t = new ld(e || {});
   window.__game = t;
+  window.addEventListener(`gbh:renderer-failure`, ({ detail }) => t.showRenderRecovery(detail));
+  window.__GBH_RENDERER_FAILURE__ && t.showRenderRecovery(window.__GBH_RENDERER_FAILURE__);
   if (window.__GBH_PENDING_NETWORK_MATCH__) {
     const pending = window.__GBH_PENDING_NETWORK_MATCH__;
     delete window.__GBH_PENDING_NETWORK_MATCH__;

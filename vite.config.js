@@ -22,6 +22,12 @@ export default defineConfig({
     apply: 'build',
     closeBundle() { buildServiceWorker(fileURLToPath(new URL('./dist/', import.meta.url))); },
   }],
+  resolve: {
+    alias: [{
+      find: /^three$/,
+      replacement: fileURLToPath(import.meta.resolve('three/src/Three.js')),
+    }],
+  },
   define: {
     __ENGINE_BUILD_ID__: JSON.stringify(engineBuildId),
   },

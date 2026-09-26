@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
 import { CHARACTER_DEFS } from '../shared/data/characters.js';
+import { installThreeGlobals } from '../src/three-global-runtime.js';
 
 const context = vm.createContext({ console, URLSearchParams });
 context.window = context;
@@ -9,18 +10,74 @@ context.performance = performance;
 context.document = { hidden: false };
 context.devicePixelRatio = 3;
 context.matchMedia = query => ({ matches: query === '(pointer: coarse)' });
+installThreeGlobals(context);
 const load = (file) => vm.runInContext(readFileSync(new URL(`../public/engine/${file}.js`, import.meta.url), 'utf8'), context, { filename: file });
 load('three-legacy');
 load('render-pipeline');
-const hdPipeline = Object.create(context.Zc.prototype);
-Object.assign(hdPipeline, {
-  superSample: 0, quality: context.Uc.low, performanceScale: 0.6,
-  maxPixelsCoarse: 1_000_000, maxPixelsFine: 5_000_000,
+const pixelPipeline = Object.create(context.Zc.prototype);
+Object.assign(pixelPipeline, {
+  superSample: 0, quality: context.Uc.low, performanceScale: 1,
+  maxPixelsCoarse: 1_500_000, maxPixelsFine: 5_000_000,
 });
-assert.ok(hdPipeline.getPixelRatio(800, 360) >= 2, 'adaptive scaling preserves at least an HD landscape buffer when the device can render it');
+assert.deepEqual(['low', 'medium', 'high', 'ultra'].map(name => context.Uc[name].renderScale), [0.9, 1, 1.25, 2], 'quality presets use the agreed CSS-relative render ratios');
+assert.equal(pixelPipeline.getPixelRatio(360, 825), 0.9, 'Low uses the requested 0.90 CSS-relative render scale');
+pixelPipeline.quality = context.Uc.medium;
+assert.equal(pixelPipeline.getPixelRatio(360, 825), 1, 'Medium uses one render pixel per CSS pixel');
+pixelPipeline.quality = context.Uc.high;
+assert.equal(pixelPipeline.getPixelRatio(360, 825), 1.25, 'High uses 1.25 render pixels per CSS pixel');
+pixelPipeline.quality = context.Uc.ultra;
+assert.equal(pixelPipeline.getPixelRatio(360, 825), 2, 'Ultra uses 2 render pixels per CSS pixel within the mobile budget');
+context.devicePixelRatio = 1;
+assert.deepEqual(['low', 'medium', 'high', 'ultra'].map(name => {
+  pixelPipeline.quality = context.Uc[name];
+  return pixelPipeline.getPixelRatio(360, 825);
+}), [0.9, 1, 1.25, 2], 'preset ratios do not change with browser devicePixelRatio');
+context.devicePixelRatio = 3;
+pixelPipeline.maxPixelsCoarse = 1_000_000;
+const cappedMobileRatio = pixelPipeline.getPixelRatio(360, 825);
+assert.ok(cappedMobileRatio < 2 && cappedMobileRatio <= Math.sqrt(1_000_000 / (360 * 825)), 'pixel budgets cap Ultra on lower-memory mobile devices');
+pixelPipeline.quality = context.Uc.low;
+pixelPipeline.performanceScale = 0.6;
+assert.equal(pixelPipeline.getPixelRatio(800, 360), 0.54, 'Low scale can be measured directly from CSS dimensions');
 const original = JSON.parse(JSON.stringify(context.Bc));
 load('character-roster');
+load('map-biomes');
 load('world');
+const previousDocumentForTexture = context.document;
+context.document = {
+  hidden: false,
+  createElement() {
+    return {
+      width: 0,
+      height: 0,
+      getContext() {
+        return {
+          createImageData(width, height) { return { data: new Uint8ClampedArray(width * height * 4) }; },
+          putImageData() {},
+        };
+      },
+    };
+  },
+};
+const waterNormalTexture = context.Xl();
+assert.equal(waterNormalTexture.wrapS, context.THREE.RepeatWrapping, 'procedural water textures use the canonical Three.js wrapping constant');
+assert.equal(waterNormalTexture.wrapT, context.THREE.RepeatWrapping, 'procedural water textures tile on both axes');
+waterNormalTexture.dispose();
+context.document = previousDocumentForTexture;
+const loadedMapPack = context.GBH_MAP_PACK;
+const riverWorldHarness = {
+  arenaName: 'river-fort', tiles: new Uint8Array(1936), styles: new Uint8Array(1936),
+  surfaceTypes: new Uint8Array(1936), hazardTiles: [], spawns: [], boxSpots: [], lampTiles: [],
+};
+context.Zl.prototype.generate.call(riverWorldHarness, 20260926);
+assert.equal(riverWorldHarness.mapBlueprint.id, 'river-fort', 'selecting River Fort generates that exact blueprint instead of a random fallback');
+assert.ok(riverWorldHarness.surfaceTypes.includes(context.BIOME_SURFACE.BRIDGE), 'River Fort retains its bridge cells as walkable surfaces');
+context.GBH_MAP_PACK = undefined;
+assert.throws(() => context.Zl.prototype.generate.call({
+  arenaName: 'river-fort', tiles: new Uint8Array(1936), styles: new Uint8Array(1936),
+  surfaceTypes: new Uint8Array(1936), hazardTiles: [],
+}, 123), /river-fort is missing from the loaded map pack/, 'named maps fail explicitly instead of silently using random legacy layouts');
+context.GBH_MAP_PACK = loadedMapPack;
 let finishGPUWork;
 let gpuResourceDisposed = false;
 context.window.__GBH_RENDERER__ = {
@@ -313,6 +370,8 @@ feedAdaptiveWindow(lowQualityAdaptive.game, 70, 6);
 assert.deepEqual(lowQualityAdaptive.calls.effects, [true, false], 'effects restore after sustained stable FPS');
 const highQualityAdaptive = makeAdaptiveQualityHarness('high', true);
 feedAdaptiveWindow(highQualityAdaptive.game, 30, 3);
+assert.deepEqual(highQualityAdaptive.calls, { quality: [], effects: [], scale: [] }, 'one low-FPS window does not switch High to Medium');
+feedAdaptiveWindow(highQualityAdaptive.game, 30, 3);
 assert.deepEqual(highQualityAdaptive.calls, { quality: ['medium'], effects: [true], scale: [] }, 'High switches to Medium at 30 FPS without dynamic resolution drops');
 
 const effectSettingHarness = Object.create(context.ld.prototype);
@@ -321,7 +380,7 @@ Object.assign(effectSettingHarness, {
   performanceEffectsReduced: false,
   mobileDefaultQuality: false,
   lowEndDevice: false,
-  pipeline: { isWebGPU: false, quality: { lampShadows: true }, requestShadowUpdate() {} },
+  pipeline: { isWebGPU: false, quality: { lampShadows: true, tier: 1 }, requestShadowUpdate() {} },
   lighting: { key: {}, lampSlots: [{}, {}], lampShadowSlots: 1 },
   effects: { setPerformanceReduced(reduced) { performanceReductions.push(reduced); } },
 });
@@ -331,25 +390,73 @@ assert.deepEqual(effectSettingHarness.lighting.lampSlots.map(light => light.cast
 effectSettingHarness.setPerformanceEffectsReduced(false);
 assert.equal(effectSettingHarness.lighting.key.castShadow, true, 'stable performance restores the directional shadow');
 assert.deepEqual(effectSettingHarness.lighting.lampSlots.map(light => light.castShadow), [true, false], 'stable performance restores only configured lamp shadows');
+effectSettingHarness.pipeline.quality = { lampShadows: false, tier: 0 };
+effectSettingHarness.syncPerformanceShadows();
+assert.equal(effectSettingHarness.lighting.key.castShadow, false, 'manual WebGL Low does not keep the directional shadow enabled');
 assert.deepEqual(performanceReductions, [true, false], 'particle effects follow the adaptive performance mode');
 
 const particleQualityCalls = [];
 const particleEffectHarness = Object.create(context.Nu.prototype);
+const fireflyDrawRanges = [];
 Object.assign(particleEffectHarness, {
   qualityTier: 0, performanceReduced: false, debrisCap: 140, debrisActiveCap: 140, debrisCursor: 0,
   glow: { setQuality(scale) { particleQualityCalls.push(['glow', scale]); } },
   smoke: { setQuality(scale) { particleQualityCalls.push(['smoke', scale]); } },
+  fireflies: { geometry: { setDrawRange(start, count) { fireflyDrawRanges.push([start, count]); } } },
   debrisData: Array.from({ length: 140 }, () => ({ life: 1 })),
-  debrisMesh: { setMatrixAt() {}, instanceMatrix: {} },
+  debrisMesh: { count: 140, setMatrixAt() {}, instanceMatrix: {} },
 });
 particleEffectHarness.setQuality(0);
 const baseDebrisCap = particleEffectHarness.debrisActiveCap;
+assert.equal(baseDebrisCap, 56, 'Low reduces the active debris instance count');
+assert.equal(particleEffectHarness.debrisMesh.count, 56, 'Low reduces actual debris draw instances');
+assert.equal(particleEffectHarness.fireflyCount, 18, 'Low reduces animated firefly population');
+assert.deepEqual(fireflyDrawRanges.at(-1), [0, 18], 'Low reduces actual firefly draw count');
 particleEffectHarness.setPerformanceReduced(true);
 assert.ok(particleEffectHarness.glow && particleEffectHarness.performanceReduced, 'adaptive particle mode is active');
 assert.ok(particleEffectHarness.debrisActiveCap < baseDebrisCap, 'adaptive particle mode lowers the debris cap');
-assert.equal(particleQualityCalls.at(-2)[1], 0.275, 'adaptive particle mode halves the Low glow budget');
+assert.equal(particleQualityCalls.at(-2)[1], 0.2, 'adaptive particle mode halves the Low glow budget');
 particleEffectHarness.setPerformanceReduced(false);
 assert.equal(particleEffectHarness.debrisActiveCap, baseDebrisCap, 'particle capacity restores with stable performance');
+
+const particleGroup = { add() {} };
+const webglParticlePool = new context.ju(particleGroup, 10, false);
+for (let index = 0; index < 6; index++) webglParticlePool.emit(index, 0, 0, 0, 0, 0, 1, 1, 0.1, 1, 1, 1);
+webglParticlePool.setQuality(0.4);
+assert.equal(webglParticlePool.maxActive, 4, 'Low clamps future WebGL particle emissions');
+assert.equal(webglParticlePool.activeSlots.length, 4, 'Low immediately removes excess live WebGL particles');
+assert.equal(webglParticlePool.activeFlags.reduce((sum, active) => sum + active, 0), 4, 'trimmed particle slots can be safely reused');
+context.window.__GBH_RENDERER__ = { kind: 'webgpu', renderer: {} };
+const webgpuParticlePool = new context.ju(particleGroup, 10, false);
+for (let index = 0; index < 6; index++) webgpuParticlePool.emit(index, 0, 0, 0, 0, 0, 1, 1, 0.1, 1, 1, 1);
+webgpuParticlePool.setQuality(0.4);
+assert.equal(webgpuParticlePool.points.geometry.drawRange.count, 4, 'Low immediately reduces the WebGPU particle draw range');
+context.window.__GBH_RENDERER__ = undefined;
+
+const bushQuality = Object.create(context.Zl.prototype);
+bushQuality.qualityTier = 3;
+const lowBushGeometry = bushQuality.createBushGeometry(0);
+const highBushGeometry = bushQuality.createBushGeometry(2);
+assert.ok(lowBushGeometry.attributes.position.count < highBushGeometry.attributes.position.count, 'Low reduces grass blade geometry while keeping bush coverage');
+let previousBushDisposed = false;
+const previousBushGeometry = bushQuality.createBushGeometry(3);
+previousBushGeometry.addEventListener('dispose', () => { previousBushDisposed = true; });
+const bushMesh = {
+  geometry: previousBushGeometry,
+  boundingSphere: { radius: 0 },
+  computeBoundingSphere() { this.boundingSphere = { radius: 1 }; },
+};
+Object.assign(bushQuality, { meshes: { bush: bushMesh }, disposables: [previousBushGeometry], bushGeometries: new Map([[3, previousBushGeometry]]) });
+assert.equal(bushQuality.setQuality(0), true, 'changing quality updates the existing bush renderer');
+assert.equal(bushMesh.geometry.parameters.radialSegments, 3, 'Low swaps to reduced grass geometry');
+assert.equal(bushMesh.boundingSphere.radius, 5.5, 'grass LOD keeps the wind-bend culling allowance');
+assert.ok(bushQuality.disposables.includes(bushMesh.geometry), 'world disposal tracks each cached grass LOD');
+assert.equal(previousBushDisposed, false, 'quality switching keeps the old geometry available to avoid repeated GPU resource churn');
+assert.equal(bushQuality.setQuality(3), true, 'switching quality back reuses the cached grass geometry');
+assert.equal(bushMesh.geometry, previousBushGeometry, 'the previously active tier is restored from the world cache');
+lowBushGeometry.dispose();
+highBushGeometry.dispose();
+for (const geometry of bushQuality.disposables) geometry.dispose();
 
 const soloRespawnTarget = {
   alive: false, deadT: 5, hp: 0, maxHp: context.Bc.dusty.hp, def: context.Bc.dusty,
@@ -503,6 +610,54 @@ for (let frame = 0; frame < 542; frame++) adaptiveScaleGame.adaptQuality(1 / 90)
 assert.deepEqual(adaptiveScaleChanges, [], 'WebGPU keeps render resolution stable after recovery');
 assert.equal(adaptiveScaleGame.performanceEffectsReduced, false, 'optional effects restore after sustained headroom');
 
+let failMediumQualityOnce = true;
+const qualityRollbackEvents = [];
+const qualityRollbackGame = Object.create(context.ld.prototype);
+Object.assign(qualityRollbackGame, {
+  userPickedQuality: false, mobileDefaultQuality: true, performanceEffectsReduced: false,
+  perf: { t: 0, frames: 0, lowFpsWindows: 0, stableFpsWindows: 0, highFpsWindows: 0 },
+  pipeline: {
+    isWebGPU: true, qualityName: 'high', quality: context.Uc.high, performanceScale: 1,
+    setQuality(name) {
+      qualityRollbackEvents.push(`pipeline:${name}`);
+      this.qualityName = name;
+      this.quality = context.Uc[name];
+      if (name === 'medium' && failMediumQualityOnce) { failMediumQualityOnce = false; throw new Error('synthetic quality failure'); }
+    },
+  },
+  effects: {
+    setQuality(tier) { qualityRollbackEvents.push(`effects:${tier}`); },
+    setPerformanceReduced(value) { qualityRollbackEvents.push(`effects-reduced:${value}`); },
+  },
+  world: { setQuality(tier) { qualityRollbackEvents.push(`world:${tier}`); } },
+  gas: { setQuality(tier) { qualityRollbackEvents.push(`gas:${tier}`); } },
+  lighting: { applyQuality(quality) { qualityRollbackEvents.push(`lighting:${quality.tier}`); } },
+  hud: { syncSettings() { qualityRollbackEvents.push('hud:sync'); }, toast(message) { qualityRollbackEvents.push(`toast:${message}`); } },
+  save() { qualityRollbackEvents.push('save'); },
+  showRenderRecovery(error) { this.renderFailed = true; this.recoveryError = error; },
+});
+assert.equal(qualityRollbackGame.setQuality('medium', true), false, 'a failed manual quality switch returns a recoverable result');
+assert.equal(qualityRollbackGame.pipeline.qualityName, 'high', 'a failed quality switch restores the previous renderer preset');
+assert.equal(qualityRollbackGame.userPickedQuality, false, 'a failed quality switch restores prior quality preference state');
+assert.equal(qualityRollbackGame.mobileDefaultQuality, true, 'a failed quality switch restores prior mobile default state');
+assert.ok(qualityRollbackEvents.includes('toast:Quality change failed. high was restored.'), 'manual quality failures are reported after rollback');
+assert.ok(!qualityRollbackEvents.includes('save'), 'failed quality changes are not persisted');
+
+const syntheticFrameError = new Error('synthetic render failure');
+const frameFailureGame = Object.create(context.ld.prototype);
+Object.assign(frameFailureGame, {
+  last: 0, simSteps: 1, frameStats: { calls: 0, triangles: 0, points: 0 },
+  pipeline: {
+    renderer: { info: { render: { calls: 0, triangles: 0, points: 0 }, reset() {} } },
+    render() { throw syntheticFrameError; },
+  },
+  update() {}, hud: { recordFrame() {} }, warmup: 0, adaptQuality() {},
+  showRenderRecovery(error) { this.renderFailed = true; this.recoveryError = error; },
+});
+frameFailureGame.frame(16);
+assert.equal(frameFailureGame.renderFailed, true, 'a render exception stops the broken loop and enters recovery instead of silently freezing');
+assert.equal(frameFailureGame.recoveryError, syntheticFrameError, 'the frame recovery path preserves the useful error');
+
 // The actual WebGL composer must keep GTAO at half buffer resolution after
 // creation and resize; a constructor-only size check misses composer resizes.
 let drawingWidth = 800;
@@ -523,6 +678,7 @@ context.matchMedia = () => ({ matches: false });
 load('render-pipeline');
 const qualityPipeline = new context.Zc(null, new context.vt(), new context.hi(60, 4 / 3, 1, 260));
 qualityPipeline.setQuality('ultra');
+assert.equal(qualityPipeline.getPixelRatio(360, 825), 2, 'quality buffer sizing follows CSS dimensions instead of a 1280×720 floor');
 assert.equal(qualityPipeline.gtao.width, 800, 'Ultra GTAO starts at half the 2x drawing width');
 assert.equal(qualityPipeline.gtao.height, 600, 'Ultra GTAO starts at half the 2x drawing height');
 let pipelineBuilds = 0;
@@ -540,9 +696,54 @@ assert.equal(pipelineBuilds, 1, 'changing AO or MSAA configuration rebuilds the 
 const fullPixelRatio = qualityPipeline.getPixelRatio(1000, 700);
 qualityPipeline.setPerformanceScale(0.8);
 assert.equal(qualityPipeline.performanceScale, 0.8, 'manual render scale is clamped and stored');
-assert.equal(qualityPipeline.getPixelRatio(1000, 700), fullPixelRatio, 'render scale cannot push a supported viewport below its HD floor');
+assert.ok(qualityPipeline.getPixelRatio(1000, 700) < fullPixelRatio, 'render scale is no longer blocked by a fixed HD floor');
 qualityPipeline.setPerformanceScale(1);
 context.window.__GBH_RENDERER__ = undefined;
+
+let webgpuPipelineBuilds = 0;
+const webgpuRenderer = {
+  domElement: { clientWidth: 360, clientHeight: 825 },
+  shadowMap: { enabled: false, type: 0, autoUpdate: false },
+  setClearColor() {}, setPixelRatio() {}, setSize() {},
+};
+context.window.__GBH_RENDERER__ = { kind: 'webgpu', renderer: webgpuRenderer };
+const webgpuQualityPipeline = new context.Zc(null, new context.vt(), new context.hi(60, 4 / 3, 1, 260));
+webgpuQualityPipeline.build = () => { webgpuPipelineBuilds += 1; };
+for (const quality of ['low', 'medium', 'high', 'ultra']) webgpuQualityPipeline.setQuality(quality);
+assert.equal(webgpuPipelineBuilds, 0, 'WebGPU quality changes never rebuild the unused WebGL post-processing composer');
+assert.equal(webgpuQualityPipeline.pixelRatio, 2, 'WebGPU receives the selected CSS-relative scale');
+context.window.__GBH_RENDERER__ = undefined;
+
+const previousGetElementById = context.document.getElementById;
+const debugElements = {
+  settings: { classList: { contains: () => true } },
+  stats: { textContent: '' },
+  'fps-counter': { textContent: '' },
+};
+context.document.getElementById = id => debugElements[id] || {};
+const hudStatsHarness = Object.create(context.Yu.prototype);
+Object.assign(hudStatsHarness, {
+  frames: 0, statsT: 0, fps: 0, fpsEl: debugElements['fps-counter'], userPickedQuality: true,
+  frameStats: { calls: 7, triangles: 1234, points: 55, updateMs: 2, updateP95Ms: 3, renderMs: 4, renderP95Ms: 5 },
+  game: {
+    frameStats: null,
+    lighting: { lampSlots: [], pool: [], mapSize: 1024, shadowRadius: 10 },
+    pipeline: {
+      isWebGPU: true, pixelRatio: 0.9, usingPCSS: false,
+      renderer: { domElement: { width: 324, height: 743, clientWidth: 360, clientHeight: 825 } },
+    },
+    perf: { benchMs: 0 },
+  },
+});
+hudStatsHarness.game.frameStats = hudStatsHarness.frameStats;
+hudStatsHarness.recordFrame(0.2);
+hudStatsHarness.recordFrame(0.3);
+assert.equal(hudStatsHarness.fps, 4, 'FPS uses actual render frames and wall-clock frame duration');
+assert.ok(debugElements.stats.textContent.includes('7 draws'), 'diagnostics report frame draw calls rather than lifetime render calls');
+assert.ok(debugElements.stats.textContent.includes('CPU submit'), 'WebGPU CPU submission time is not presented as GPU time');
+assert.ok(debugElements.stats.textContent.includes('buffer 324×743 (0.90×; CSS 360×825)'), 'diagnostics expose CSS size, effective ratio, and drawing buffer');
+if (previousGetElementById === undefined) delete context.document.getElementById;
+else context.document.getElementById = previousGetElementById;
 
 // Multiplayer effects are cosmetic: a server leap first animates in the air,
 // then plays the same landing effect as solo without applying local damage.
@@ -864,4 +1065,4 @@ for (const id of ['dusty', 'fuse', 'volt']) {
     assert.deepEqual(after, before, `${id}: ${slot} gameplay preserved`);
   }
 }
-console.log('PASS: ten gameplay rigs + two design rigs, solo skills/domains/barrier/parry, Super respawn retention, bot targeting/roster, auto-aim priority, adaptive effects and HD resolution floor, items/Flicker/traps, multiplayer visuals, material ownership, silhouettes, and combat tuning.');
+console.log('PASS: ten gameplay rigs + two design rigs, solo skills/domains/barrier/parry, Super respawn retention, bot targeting/roster, auto-aim priority, CSS-relative render budgets, quality LOD/effects, per-frame diagnostics, items/Flicker/traps, multiplayer visuals, material ownership, silhouettes, and combat tuning.');

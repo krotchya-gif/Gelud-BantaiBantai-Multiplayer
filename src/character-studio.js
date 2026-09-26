@@ -1,4 +1,5 @@
 import './character-studio.css';
+import { installThreeGlobals } from './three-global-runtime.js';
 
 const canvas = document.getElementById('studio-canvas');
 const loading = document.getElementById('loading');
@@ -15,6 +16,7 @@ async function loadScript(name) {
 }
 
 try {
+  installThreeGlobals(window);
   for (const name of scripts) await loadScript(name);
 
   const renderer = new window.uc({ canvas, antialias: true, alpha: true });

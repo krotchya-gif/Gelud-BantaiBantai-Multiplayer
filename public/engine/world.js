@@ -905,13 +905,14 @@ function Xl() {
     }
   n.putImageData(r, 0, 0);
   let o = new cr(t);
-  return ((o.wrapS = o.wrapT = e), o.repeat.set(44 / 5, 44 / 5), o);
+  return ((o.wrapS = o.wrapT = THREE.RepeatWrapping), o.repeat.set(44 / 5, 44 / 5), o);
 }
 var Zl = class {
-    constructor(e, t, n = 8, arenaName = `open`) {
+    constructor(e, t, n = 8, arenaName = `open`, qualityTier = 2) {
       ((this.scene = e),
         (this.anisotropy = n),
         (this.arenaName = ARENA_VARIANTS[arenaName] ? arenaName : `open`),
+        (this.qualityTier = Math.max(0, Math.min(3, Math.trunc(Number(qualityTier) || 0)))),
         (this.group = new ut()),
         e.add(this.group),
         (this.tiles = new Uint8Array(1936)),
@@ -928,6 +929,7 @@ var Zl = class {
         (this.lanterns = []),
         (this.meshes = {}),
         (this.disposables = []),
+        (this.bushGeometries = new Map()),
         (this.aoDirty = !1),
         (this.aoTimer = 0),
         (this._g = new Float32Array(1936)),
@@ -939,15 +941,20 @@ var Zl = class {
           uTime: { value: 0 },
           uPushers: { value: Array.from({ length: 8 }, () => new Ne(0, 0, 1, 0)) },
           uReveal: { value: new Ne(0, 0, 0, 0) },
-        }),
-        this.generate(t),
-        this.buildGround(),
-        this.buildWalls(),
-        this.buildBushes(),
-        this.buildWater(),
-        this.buildBiomeSurfaces(),
-        this.buildLamps(),
-        this.buildOutskirts());
+        }));
+      try {
+        this.generate(t);
+        this.buildGround();
+        this.buildWalls();
+        this.buildBushes();
+        this.buildWater();
+        this.buildBiomeSurfaces();
+        this.buildLamps();
+        this.buildOutskirts();
+      } catch (error) {
+        this.dispose();
+        throw error;
+      }
     }
     toTile(e) {
       return Math.floor(e + 22);
@@ -1000,8 +1007,12 @@ var Zl = class {
     }
     generate(e) {
       let mapPack = window.GBH_MAP_PACK;
-      if (mapPack?.MAPS[this.arenaName]) {
+      if (mapPack?.MAPS?.[this.arenaName]) {
+        if (typeof mapPack.generate !== `function` || typeof mapPack.applyLegacyWorld !== `function`)
+          throw new Error(`[world] map pack is incomplete for ${this.arenaName}`);
         let blueprint = mapPack.generate(this.arenaName, e);
+        if (blueprint?.id !== this.arenaName || blueprint.cells?.length !== this.tiles.length)
+          throw new Error(`[world] map pack returned an invalid blueprint for ${this.arenaName}`);
         mapPack.applyLegacyWorld(this, blueprint, Z, Fc);
         this.seed = e;
         this.surfaceTypes.fill(BIOME_SURFACE.NONE);
@@ -1034,6 +1045,8 @@ var Zl = class {
         this.mapHazards = blueprint.hazards;
         return;
       }
+      if (this.arenaName !== `open` && this.arenaName !== `stepped`)
+        throw new Error(`[world] selected map ${this.arenaName} is missing from the loaded map pack`);
       this.mapBlueprint = null;
       this.biomeName = null;
       this.biomePalette = null;
@@ -1552,18 +1565,42 @@ var Zl = class {
       }
       this.disposables.push(c);
     }
+    createBushGeometry(tier = this.qualityTier) {
+      const detail = [[3, 1], [4, 2], [5, 3], [6, 4]][Math.max(0, Math.min(3, Math.trunc(tier)))];
+      let geometry = new gr(0.2, 1, detail[0], detail[1]);
+      geometry.translate(0, 0.5, 0);
+      let positions = geometry.attributes.position;
+      for (let index = 0; index < positions.count; index++) {
+        let height = positions.getY(index);
+        (positions.setX(index, positions.getX(index) + height * height * 0.2), positions.setZ(index, positions.getZ(index) * 0.5));
+      }
+      geometry.computeVertexNormals();
+      return geometry;
+    }
+    setQuality(tier) {
+      const nextTier = Math.max(0, Math.min(3, Math.trunc(Number(tier) || 0)));
+      if (nextTier === this.qualityTier) return !1;
+      const bush = this.meshes.bush;
+      if (bush) {
+        let next = this.bushGeometries.get(nextTier);
+        if (!next) {
+          next = this.createBushGeometry(nextTier);
+          this.bushGeometries.set(nextTier, next);
+          this.disposables.push(next);
+        }
+        bush.geometry = next;
+        bush.computeBoundingSphere();
+        bush.boundingSphere.radius += 4.5;
+      }
+      this.qualityTier = nextTier;
+      return !0;
+    }
     buildBushes() {
       let e = Qc(this.seed ^ 2821),
         t = [];
       for (let e = 0; e < 44; e++) for (let n = 0; n < 44; n++) this.tiles[Fl(n, e)] === Z.BUSH && t.push([n, e]);
-      let n = new gr(0.2, 1, 5, 3);
-      n.translate(0, 0.5, 0);
-      let r = n.attributes.position;
-      for (let e = 0; e < r.count; e++) {
-        let t = r.getY(e);
-        (r.setX(e, r.getX(e) + t * t * 0.2), r.setZ(e, r.getZ(e) * 0.5));
-      }
-      n.computeVertexNormals();
+      let n = this.createBushGeometry();
+      this.bushGeometries.set(this.qualityTier, n);
       let i = new Nr({ color: 16777215, roughness: 0.78, metalness: 0 }),
         a = this.grassUniforms;
       if (window.__GBH_RENDERER__?.kind !== `webgpu`) i.onBeforeCompile = (e) => {

@@ -80,17 +80,22 @@ var Nu = class {
       ((this.ringCursor = 0), this.setQuality(e.pipeline.quality.tier), this.buildFireflies());
     }
     setQuality(e) {
-      this.qualityTier = e;
-      let t = [0.55, 0.75, 0.9, 1][e] ?? 1;
+      this.qualityTier = Math.max(0, Math.min(3, Math.trunc(e)));
+      let t = [0.4, 0.65, 0.85, 1][this.qualityTier] ?? 1;
       let particleScale = t * (this.performanceReduced ? 0.5 : 1);
       (this.glow.setQuality(particleScale), this.smoke.setQuality(particleScale));
       let n = Math.max(24, Math.round(this.debrisCap * t));
       this.performanceReduced && (n = Math.max(12, Math.round(n * 0.5)));
-      if (n === this.debrisActiveCap) return;
+      this.fireflyCount = [18, 36, 60, 90][this.qualityTier] ?? 90;
+      this.fireflies?.geometry.setDrawRange(0, this.fireflyCount);
+      if (n === this.debrisActiveCap) {
+        this.debrisMesh.count = n;
+        return;
+      }
       if (n < this.debrisActiveCap)
         for (let e = n; e < this.debrisActiveCap; e++)
           ((this.debrisData[e].life = 0), this.debrisMesh.setMatrixAt(e, Kl));
-      ((this.debrisActiveCap = n), (this.debrisCursor %= n), (this.debrisMesh.instanceMatrix.needsUpdate = !0));
+      ((this.debrisActiveCap = n), (this.debrisCursor %= n), (this.debrisMesh.count = n), (this.debrisMesh.instanceMatrix.needsUpdate = !0));
     }
     setPerformanceReduced(e) {
       let reduced = !!e;
@@ -150,6 +155,7 @@ var Nu = class {
           blending: 2,
         })),
         (this.fireflies = new ar(o, this.fireflyMat)),
+        this.fireflies.geometry.setDrawRange(0, this.fireflyCount || 90),
         (this.fireflies.frustumCulled = !1),
         (this.fireflies.renderOrder = 9),
         this.game.scene.add(this.fireflies));
@@ -603,7 +609,7 @@ var Nu = class {
       if (t.pipeline.isWebGPU) {
         let r = this.fireflies.geometry.attributes.position.array;
         if (n.night > 0.01) {
-          for (let i = 0; i < this.fireflyPhases.length; i++) {
+          for (let i = 0; i < this.fireflyCount; i++) {
             let a = this.fireflyPhases[i],
               o = i * 3;
             ((r[o] = this.fireflyBase[o] + Math.sin(t.elapsed * 0.6 + a) * 0.7 + Math.sin(t.elapsed * 1.3 + a * 2) * 0.25),
